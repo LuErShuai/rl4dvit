@@ -5,14 +5,11 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 from torch.distributions import Categorical
-
+from env_deit import DeitEnv
+import threading
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-env = gym.make("CartPole-v0").unwrapped
-
-state_size = env.observation_space.shape[0]
-action_size = env.action_space.n
-lr = 0.0001
+# env = gym.make("CartPole-v0").unwrapped
 
 class Actor(nn.Module):
     def __init__(self, state_size, action_size):
@@ -55,75 +52,83 @@ def compute_returns(next_value, rewards, masks, gamma=0.99):
         returns.insert(0, R)
     return returns
 
+class Agent:
+    def __init__(self, env):
+        self.state_size = env.observation_space.shape[0]
+        self.action_size = env.action_space.n
+        self.lr = 0.0001
+        if os.path.exists('model/actor.pkl'):
+            sefl.actor = torch.load('model/actor.pkl')
+            print('Actor Model loaded')
+        else:
+            self.actor = Actor(self.state_size, self.action_size).to(device)
+        if os.path.exists('model/critic.pkl'):
+            self.critic = torch.load('model/critic.pkl')
+            print('Critic Model loaded')
+        else:
+            self.critic = Critic(self.state_size, self.action_size).to(device)
 
-def trainIters(actor, critic, n_iters):
-    optimizerA = optim.Adam(actor.parameters())
-    optimizerC = optim.Adam(critic.parameters())
-    for iter in range(n_iters):
-        state = env.reset()
-        log_probs = []
-        values = []
-        rewards = []
-        masks = []
-        entropy = 0
-        env.reset()
+        pass
 
-        for i in count():
-            env.render()
-            state = torch.FloatTensor(state).to(device)
-            dist, value = actor(state), critic(state)
-
-            action = dist.sample()
-            next_state, reward, done, _ = env.step(action.cpu().numpy())
-
-            log_prob = dist.log_prob(action).unsqueeze(0)
-            entropy += dist.entropy().mean()
-
-            log_probs.append(log_prob)
-            values.append(value)
-            rewards.append(torch.tensor([reward], dtype=torch.float, device=device))
-            masks.append(torch.tensor([1-done], dtype=torch.float, device=device))
-
-            state = next_state
-
-            if done:
-                print('Iteration: {}, Score: {}'.format(iter, i))
-                break
-
-
-        next_state = torch.FloatTensor(next_state).to(device)
-        next_value = critic(next_state)
-        returns = compute_returns(next_value, rewards, masks)
-
-        log_probs = torch.cat(log_probs)
-        returns = torch.cat(returns).detach()
-        values = torch.cat(values)
-
-        advantage = returns - values
-
-        actor_loss = -(log_probs * advantage.detach()).mean()
-        critic_loss = advantage.pow(2).mean()
-
-        optimizerA.zero_grad()
-        optimizerC.zero_grad()
-        actor_loss.backward()
-        critic_loss.backward()
-        optimizerA.step()
-        optimizerC.step()
-    torch.save(actor, 'model/actor.pkl')
-    torch.save(critic, 'model/critic.pkl')
-    env.close()
-
+    def train(n_epoch=100):
+    
+        optimizerA = optim.Adam(actor.parameters())
+        optimizerC = optim.Adam(critic.parameters())
+        for epoch in range(n_epoch):
+            state = env.reset()
+            log_probs = []
+            values = []
+            rewards = []
+            masks = []
+            entropy = 0
+            env.reset()
+    
+            for i in count():
+                env.render()
+                state = torch.FloatTensor(state).to(device)
+                dist, value = actor(state), critic(state)
+    
+                action = dist.sample()
+                next_state, reward, done, _ = env.step(action.cpu().numpy())
+    
+                log_prob = dist.log_prob(action).unsqueeze(0)
+                entropy += dist.entropy().mean()
+    
+                log_probs.append(log_prob)
+                values.append(value)
+                rewards.append(torch.tensor([reward], dtype=torch.float, device=device))
+                masks.append(torch.tensor([1-done], dtype=torch.float, device=device))
+    
+                state = next_state
+    
+                if done:
+                    print('Iteration: {}, Score: {}'.format(epoch, i))
+                    break
+    
+    
+            next_state = torch.FloatTensor(next_state).to(device)
+            next_value = critic(next_state)
+            returns = compute_returns(next_value, rewards, masks)
+    
+            log_probs = torch.cat(log_probs)
+            returns = torch.cat(returns).detach()
+            values = torch.cat(values)
+    
+            advantage = returns - values
+    
+            actor_loss = -(log_probs * advantage.detach()).mean()
+            critic_loss = advantage.pow(2).mean()
+    
+            optimizerA.zero_grad()
+            optimizerC.zero_grad()
+            actor_loss.backward()
+            critic_loss.backward()
+            optimizerA.step()
+            optimizerC.step()
+        torch.save(actor, 'model/actor.pkl')
+        torch.save(critic, 'model/critic.pkl')
+        env.close()
 
 if __name__ == '__main__':
-    if os.path.exists('model/actor.pkl'):
-        actor = torch.load('model/actor.pkl')
-        print('Actor Model loaded')
-    else:
-        actor = Actor(state_size, action_size).to(device)
-    if os.path.exists('model/critic.pkl'):
-        critic = torch.load('model/critic.pkl')
-        print('Critic Model loaded')
-    else:
-        critic = Critic(state_size, action_size).to(device)
-    trainIters(actor, critic, n_iters=100)
+    condition = threading.Condition()
+    train(100, condition)
