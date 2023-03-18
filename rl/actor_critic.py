@@ -53,7 +53,7 @@ def compute_returns(next_value, rewards, masks, gamma=0.99):
     return returns
 
 class Agent:
-    def __init__(self, env):
+    def __init__(self, env, condition):
         self.state_size = env.observation_space.shape[0]
         self.action_size = env.action_space.n
         self.lr = 0.0001
@@ -68,7 +68,7 @@ class Agent:
         else:
             self.critic = Critic(self.state_size, self.action_size).to(device)
 
-        pass
+        self.condition = condition
 
     def train(n_epoch=100):
     
@@ -85,10 +85,45 @@ class Agent:
     
             for i in count():
                 env.render()
+
+                # get obs from deit
+                with self.condition:
+                    print("RL : Deit, d u need a mask?")
+                    condition.notify()
+                    condition.wait()
+                    # print("Deit : yes!")
+
+                    print("RL   : pass me the state please.")
+                    conditon.notify()
+                    condition.wait()
+                    # print("Deit : here u go.")
+
+                    state = self.get_state_from_deit()
+                    action = choose_action(state)
+                    
+                    set_mask_for_deit(action)
+                    print("RL   : got it! here is the mask that you want.")
+                    condition.notify()
+                    condition.wait()
+
+
                 state = torch.FloatTensor(state).to(device)
                 dist, value = actor(state), critic(state)
     
                 action = dist.sample()
+
+
+                # get obs_next from deit
+                with self.condition:
+                    # print("Deit : step one block with mask done! obs_next give u.")
+                    condition.wait()
+                    state_ = self.get_state_from_deit()
+                    print("RL   : got it! done!")
+                    condition.notify()
+
+
+
+
                 next_state, reward, done, _ = env.step(action.cpu().numpy())
     
                 log_prob = dist.log_prob(action).unsqueeze(0)

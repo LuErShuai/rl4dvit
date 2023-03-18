@@ -53,18 +53,18 @@ class DeitEnv(gym.Env):
         # deit send [obs, action, obs_]
         # receive [obs, action, obs_] from deit
         # continue
-        with self.condition:
-            print("{} : Mr.Deit, r u finish step one block?".format(self.name)
-            condition.notify()
-            condition.wait()
+        # with self.condition:
+        #     print("{} : Mr.Deit, r u finish step one block?".format(self.name)
+        #     condition.notify()
+        #     condition.wait()
 
-            print("{} : Mr.Deit, r u finish set obs next?".format(self.name)
-            condition.notify()
-            condition.wait()
-            
-            print("{} : Trying to get obs next ... ".format(self.name))
-            obs_ = self.get_obs_next()
-            print("{} : Got it!".format(self.name))
+        #     print("{} : Mr.Deit, r u finish set obs next?".format(self.name)
+        #     condition.notify()
+        #     condition.wait()
+        #     
+        #     print("{} : Trying to get obs next ... ".format(self.name))
+        #     obs_ = self.get_obs_next()
+        #     print("{} : Got it!".format(self.name))
 
         return obs_, reward, done, {}
 
