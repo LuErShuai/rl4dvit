@@ -453,8 +453,7 @@ class DynamicVisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
-                 act_layer=None, weight_init='', args=None, condition=None,
-                 agent_interface):
+                 act_layer=None, weight_init='', args=None, condition=None, agent):
         """
         Args:
             img_size (int, tuple): input image size
@@ -518,8 +517,6 @@ class DynamicVisionTransformer(nn.Module):
         self.init_weights(weight_init)
         
         self.condition = condition
-        self.agent = agent
-        self.interface = interface
 
     def init_weights(self, mode=''):
         assert mode in ('jax', 'jax_nlhb', 'nlhb', '')
@@ -625,12 +622,7 @@ class DynamicVisionTransformer(nn.Module):
             #     # mask = self.get_mask_from_rl_agent(x)
             #     condition.notify()
 
-            mask = self.agent_interface.get_mask()
-
             block.foward(x, mask)
-                        
-            self.agent_interface.send_step_signal_to_rl()
-            self.agent_interface.send_state_next_to_rl(x)
 
             # with self.condition:
             #     print("Deit : step one block with mask done! obs_next give u.")

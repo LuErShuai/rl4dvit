@@ -58,7 +58,7 @@ class Agent:
         self.action_size = env.action_space.n
         self.lr = 0.0001
         if os.path.exists('model/actor.pkl'):
-            sefl.actor = torch.load('model/actor.pkl')
+            self.actor = torch.load('model/actor.pkl')
             print('Actor Model loaded')
         else:
             self.actor = Actor(self.state_size, self.action_size).to(device)
@@ -86,25 +86,25 @@ class Agent:
             for i in count():
                 env.render()
 
-                # get obs from deit
-                with self.condition:
-                    print("RL : Deit, d u need a mask?")
-                    condition.notify()
-                    condition.wait()
-                    # print("Deit : yes!")
+                # # get obs from deit
+                # with self.condition:
+                #     print("RL : Deit, d u need a mask?")
+                #     condition.notify()
+                #     condition.wait()
+                #     # print("Deit : yes!")
 
-                    print("RL   : pass me the state please.")
-                    conditon.notify()
-                    condition.wait()
-                    # print("Deit : here u go.")
+                #     print("RL   : pass me the state please.")
+                #     conditon.notify()
+                #     condition.wait()
+                #     # print("Deit : here u go.")
 
-                    state = self.get_state_from_deit()
-                    action = choose_action(state)
-                    
-                    set_mask_for_deit(action)
-                    print("RL   : got it! here is the mask that you want.")
-                    condition.notify()
-                    condition.wait()
+                #     state = self.get_state_from_deit()
+                #     action = choose_action(state)
+                #     
+                #     set_mask_for_deit(action)
+                #     print("RL   : got it! here is the mask that you want.")
+                #     condition.notify()
+                #     condition.wait()
 
 
                 state = torch.FloatTensor(state).to(device)
@@ -113,13 +113,13 @@ class Agent:
                 action = dist.sample()
 
 
-                # get obs_next from deit
-                with self.condition:
-                    # print("Deit : step one block with mask done! obs_next give u.")
-                    condition.wait()
-                    state_ = self.get_state_from_deit()
-                    print("RL   : got it! done!")
-                    condition.notify()
+                # # get obs_next from deit
+                # with self.condition:
+                #     # print("Deit : step one block with mask done! obs_next give u.")
+                #     condition.wait()
+                #     state_ = self.get_state_from_deit()
+                #     print("RL   : got it! done!")
+                #     condition.notify()
 
 
 

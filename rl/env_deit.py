@@ -44,6 +44,7 @@ class DeitEnv(gym.Env):
         self.name = "#####"
         self.condition = condition
         self.obs_ = None
+        self.deit_interface = interface
         pass
 
     def step(self, action):
@@ -65,6 +66,9 @@ class DeitEnv(gym.Env):
         #     print("{} : Trying to get obs next ... ".format(self.name))
         #     obs_ = self.get_obs_next()
         #     print("{} : Got it!".format(self.name))
+        self.interface.wait_step_singnal_from_deit()
+
+        obs_ = self.interface.receive_state_from_deit()
 
         return obs_, reward, done, {}
 
