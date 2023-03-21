@@ -40,9 +40,10 @@ class DeitEnv(gym.Env):
     Episode Termination:
         Considered solved when the total step bigger than 1000.
     """
-    def __init__(self, condition):
+    def __init__(self, reader, writer):
         self.name = "#####"
-        self.condition = condition
+        self.reader = reader
+        self.writer = writer
         self.obs_ = None
         self.deit_interface = interface
         pass
@@ -72,11 +73,7 @@ class DeitEnv(gym.Env):
 
         return obs_, reward, done, {}
 
-
-    def set_obs_next(self):
-        pass
-    
-    def get_obs_next(self):
+    def render():
         pass
 
     def reset(self):
