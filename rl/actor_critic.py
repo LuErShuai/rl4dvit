@@ -164,6 +164,10 @@ class Agent:
         torch.save(critic, 'model/critic.pkl')
         env.close()
 
+def main(condition):
+    pass
+    
+
 if __name__ == '__main__':
     condition = threading.Condition()
     train(100, condition)
