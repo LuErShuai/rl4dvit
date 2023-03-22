@@ -184,7 +184,7 @@ def get_args_parser():
     return parser
 
 
-def main(args, condition):
+def main(args):
     utils.init_distributed_mode(args)
 
     print(args)

@@ -1,19 +1,30 @@
-import os
-import sys
-import subprocess
+import time
+from multiprocessing import Process, Queue
+
+def run_rl(lst_queue):
+    pass
+
+def run_deit(lst_queue):
+    pass
+
+def main():
+    lst_queue = []
+    queue_mask = Queue()
+    queue_state = Queue()
+    lst_queue.append(queue_mask)
+    lst_queue.append(queue_state)
+
+    p_rl = Process(target=run_rl, args=(lst_queue,))
+    p_deit = Process(target=run_deit, args=(lst_queue))
+
+    p_rl.start()
+    p_deit.start()
+
+    p_rl.join()
+    p_deit.join()
+
+    p_rl.terminate()
+    p_deit.terminate()
 
 if __name__ == '__main__':
-    worker1_read, worker2_write = os.pipe()
-    worker2_read, worker1_write = os.pipe()
-
-    cmd1 = [sys.executable, "-m", "./deit/main", str(worker1_read),
-            str(worker1_write)]
-    cmd2 = [sys.executable, "-m", "./rl/actor_critic", str(worker2_read),
-            str(worker2_write)]
-
-    proc1 = subprocess.Popen(cmd1, pass_fds=(worker1_read, worker1_write))
-    proc2 = subprocess.Popen(cmd2, pass_fds=(worker2_read, worker2_write))
-
-    
-
-
+    main()
