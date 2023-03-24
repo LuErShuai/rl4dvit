@@ -80,5 +80,8 @@ class DeitEnv(gym.Env):
         pass
 
     def close():
+
         pass
 
+    def get_data_for_one_epoch():
+        pass

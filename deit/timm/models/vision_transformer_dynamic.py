@@ -453,8 +453,8 @@ class DynamicVisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
-                 act_layer=None, weight_init='', args=None, condition=None,
-                 agent_interface):
+                 act_layer=None, weight_init='', args=None, lst_queue=None
+                 ):
         """
         Args:
             img_size (int, tuple): input image size
@@ -517,9 +517,10 @@ class DynamicVisionTransformer(nn.Module):
 
         self.init_weights(weight_init)
         
-        self.condition = condition
-        self.agent = agent
-        self.interface = interface
+        self.lst_queue = lst_queue
+        self.queue_mask = lst_queue[0]
+        self.queue_reset = lst_queue[1]
+        self.queue_state = lst_queue[2]
 
     def init_weights(self, mode=''):
         assert mode in ('jax', 'jax_nlhb', 'nlhb', '')

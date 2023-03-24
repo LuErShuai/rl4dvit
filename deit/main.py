@@ -28,6 +28,7 @@ import models_v2
 
 import utils
 
+from multiprocessing import Queue
 
 def get_args_parser():
     parser = argparse.ArgumentParser('DeiT training and evaluation script', add_help=False)
@@ -475,6 +476,17 @@ def main(args):
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
+
+def run(lst_queue):
+    parser = argparse.ArgumentParser('DeiT training and evaluation script', parents=[get_args_parser()])
+    parser.add_argument('--lst_queue', default=None, type=Queue, help='list of queue
+            for data transpotation to rl')
+    args = parser.parse_args()
+    if args.output_dir:
+        Path(args.output_dir).mkdir(parents=True, exist_ok=True)
+    main(args)
+
+
 
 
 if __name__ == '__main__':
