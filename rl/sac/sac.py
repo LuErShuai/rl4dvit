@@ -6,7 +6,7 @@ from torch.optim import Adam
 import gym
 import time
 import core as core
-from cooling import CoolingEnv
+from deit import DeitEnv 
 from logx import EpochLogger
 
 
@@ -357,7 +357,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             logger.log_tabular('Time', time.time()-start_time)
             logger.dump_tabular()
 
-if __name__ == '__main__':
+def run(lst_queue):
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--env', type=str, default='HalfCheetah-v2')
@@ -375,10 +375,33 @@ if __name__ == '__main__':
     torch.set_num_threads(torch.get_num_threads())
 
     def make():
-        env = CoolingEnv()
+        env = DeitEnv(lst_queue)
         return env
     
     sac(lambda : make(), actor_critic=core.MLPActorCritic,
+        ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), 
+        gamma=args.gamma, seed=args.seed, epochs=args.epochs,
+        logger_kwargs=logger_kwargs)
+
+
+if __name__ == '__main__':
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--env', type=str, default='HalfCheetah-v2')
+    parser.add_argument('--hid', type=int, default=256)
+    parser.add_argument('--l', type=int, default=2)
+    parser.add_argument('--gamma', type=float, default=0.99)
+    parser.add_argument('--seed', '-s', type=int, default=0)
+    parser.add_argument('--epochs', type=int, default=50)
+    parser.add_argument('--exp_name', type=str, default='sac')
+    args = parser.parse_args()
+
+    from run_utils import setup_logger_kwargs
+    logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
+
+    torch.set_num_threads(torch.get_num_threads())
+
+    sac(lambda : gym.make(arg.env), actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid]*args.l), 
         gamma=args.gamma, seed=args.seed, epochs=args.epochs,
         logger_kwargs=logger_kwargs)
