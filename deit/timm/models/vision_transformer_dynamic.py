@@ -606,6 +606,9 @@ class DynamicVisionTransformer(nn.Module):
             selected = int(0.634 * x.shape[2])
             x[:,:,selected].data *= 0.
 
+
+        # put the data in the queue_reset, for env.reset 
+        self.queue_reset.put(x)
         for i, block in enumerate(self.blocks):
 
             # with self.condition:
@@ -626,12 +629,13 @@ class DynamicVisionTransformer(nn.Module):
             #     # mask = self.get_mask_from_rl_agent(x)
             #     condition.notify()
 
-            mask = self.agent_interface.get_mask()
+            # put data into queue_state
+            self.queue_state.put(x)
+            # get mask from queue mask
+            mask = self.queue_mask.get()
 
             block.foward(x, mask)
                         
-            self.agent_interface.send_step_signal_to_rl()
-            self.agent_interface.send_state_next_to_rl(x)
 
             # with self.condition:
             #     print("Deit : step one block with mask done! obs_next give u.")
