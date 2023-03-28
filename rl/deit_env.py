@@ -40,13 +40,12 @@ class DeitEnv(gym.Env):
     Episode Termination:
         Considered solved when the total step bigger than 1000.
     """
-    def __init__(self, lst_queue):
-        self.name = "#####"
-        self.obs_ = None
+    def __init__(self):
+        self.action_space = spaces.Discreate(2)
+        high = np.full([178], fill_value=math.inf)
+        self.observation_space = spaces.Box(-high, high, dtype=np.float32
+            
 
-        self.queue_mask = lst_queue[0]
-        self.queue_state = lst_queue[1]
-        self.queue_reset = lst_queue[2]
 
     def step(self, action):
         # wait for singnal
