@@ -98,7 +98,7 @@ class PPO():
         self.counter += 1
 
 
-    def update(self):
+    def update(self, i_ep):
         state = torch.tensor([t.state for t in self.buffer], dtype=torch.float)
         action = torch.tensor([t.action for t in self.buffer], dtype=torch.long).view(-1, 1)
         reward = [t.reward for t in self.buffer]
@@ -116,8 +116,8 @@ class PPO():
         #print("The agent is updateing....")
         for i in range(self.ppo_update_time):
             for index in BatchSampler(SubsetRandomSampler(range(len(self.buffer))), self.batch_size, False):
-                # if self.training_step % 1000 ==0:
-                    # print('I_ep {} ，train {} times'.format(i_ep,self.training_step))
+                if self.training_step % 1000 ==0:
+                    print('I_ep {} ，train {} times'.format(i_ep,self.training_step))
                 #with torch.no_grad():
                 Gt_index = Gt[index].view(-1, 1)
                 V = self.critic_net(state[index])
@@ -149,4 +149,26 @@ class PPO():
 
         del self.buffer[:] # clear experience
 
+    
+def main():
+    agent = PPO()
+    for i_epoch in range(1000):
+        state = env.reset()
+        if render: env.render()
 
+        for t in count():
+            action, action_prob = agent.select_action(state)
+            next_state, reward, done, _ = env.step(action)
+            trans = Transition(state, action, action_prob, reward, next_state)
+            if render: env.render()
+            agent.store_transition(trans)
+            state = next_state
+
+            if done :
+                if len(agent.buffer) >= agent.batch_size:agent.update(i_epoch)
+                agent.writer.add_scalar('liveTime/livestep', t, global_step=i_epoch)
+                break
+
+if __name__ == '__main__':
+    main()
+    print("end")

@@ -40,8 +40,39 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         with torch.cuda.amp.autocast():
             outputs = model(samples)
             loss = criterion(samples, outputs, targets)
-
+        
+        # size of loss:[batch_size]
         loss_value = loss.item()
+
+        # train agent
+        classify_results = outputs - targets
+
+        Transition = namedtuple('Transition', ['state', 'action',  'a_log_prob', 'reward', 'next_state'])
+        buffers = model.buffer
+
+        batch_size = buffers["state"].shape[0]
+        block_num  = len(buffers)
+        for i in range(batch_size):
+            classify_result = classify_results[i]
+            for j in range(block_num):
+                # size of buffer["state"]: [block_num, batch_size, token_num, token_dim]
+                state = buffers["state"][j][i]
+                action = buffers["action"][j][i]
+                action_prob = buffers["action_prob"][j][i]
+                state_next  = buffers["state_next"][j][i]
+                reward = calulate_reward(j, classify_result, action)
+            
+                trans = Transition(state, action, action_prob, reward, next_state)
+                model.agent.store_transition(trans)
+
+            # one image with 12 block
+            # which means 12 step/transition for rl
+            # after 12 transition store into agent.buffer
+            # mean this trajecotry for rl is done
+            # so the update should being excuted
+            if len(model.agent.buffer) > model.agent.batch_size:
+                model.agent.update()
+        
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -65,6 +96,22 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
+def caculate_reward(num_block, classify_result, action):
+    reward_for_classify = 1 
+    # simplest: split equally
+    if classify_result = 0:
+        reward_1 = reward_for_classify/12
+    else:
+        reward_1 = -reward_for_classify/12
+
+    reward_for_action = 0.1
+    reward_2 = 0
+    for i in range(len(action)):
+        # action: 0:discard token 
+        #         1:keep token
+        reward_2 += (1 - action[i])*reward_for_action
+        
+    return reward_1 + reward_2
 
 @torch.no_grad()
 def evaluate(data_loader, model, device):

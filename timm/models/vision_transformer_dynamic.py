@@ -13,6 +13,10 @@ from .helpers import build_model_with_cfg, named_apply, adapt_input_conv
 from .layers import PatchEmbed, Mlp, DropPath, trunc_normal_, lecun_normal_, ACT_Mlp
 from .registry import register_model
 
+from rl.ppo.ppo import PPO
+
+import numpy sa np
+
 _logger = logging.getLogger(__name__)
 
 
@@ -453,7 +457,7 @@ class DynamicVisionTransformer(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
-                 act_layer=None, weight_init='', args=None, lst_queue=None
+                 act_layer=None, weight_init='', args=None, 
                  ):
         """
         Args:
@@ -516,11 +520,15 @@ class DynamicVisionTransformer(nn.Module):
             self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
 
         self.init_weights(weight_init)
-        
-        self.lst_queue = lst_queue
-        self.queue_mask = lst_queue[0]
-        self.queue_reset = lst_queue[1]
-        self.queue_state = lst_queue[2]
+
+        self.agent = PPO()
+        self.buffer = 
+        {
+            "state":[],
+            "state_next":[],
+            "action":[],
+            "action_prob":[]
+        }
 
     def init_weights(self, mode=''):
         assert mode in ('jax', 'jax_nlhb', 'nlhb', '')
@@ -559,39 +567,6 @@ class DynamicVisionTransformer(nn.Module):
         if self.num_tokens == 2:
             self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
 
-    # def forward_features(self, x):
-    #     x = self.patch_embed(x)
-    #     cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
-    #     if self.dist_token is None:
-    #         x = torch.cat((cls_token, x), dim=1)
-    #     else:
-    #         x = torch.cat((cls_token, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
-    #     x = self.pos_drop(x + self.pos_embed)
-
-    #     if 0:
-    #         selected = int(0.634 * x.shape[2])
-    #         x[:,:,selected].data *= 0.
-
-    #     x = self.blocks(x)
-
-    #     x = self.norm(x)
-    #     if self.dist_token is None:
-    #         return self.pre_logits(x[:, 0])
-    #     else:
-    #         return x[:, 0], x[:, 1]
-
-    # def forward(self, x):
-    #     x = self.forward_features(x)
-    #     if self.head_dist is not None:
-    #         x, x_dist = self.head(x[0]), self.head_dist(x[1])  # x must be a tuple
-    #         if self.training and not torch.jit.is_scripting():
-    #             # during inference, return the average of both classifier predictions
-    #             return x, x_dist
-    #         else:
-    #             return (x + x_dist) / 2
-    #     else:
-    #         x = self.head(x)
-    #     return x
     
     def forward_features(self, x):
         x = self.patch_embed(x)
@@ -606,49 +581,29 @@ class DynamicVisionTransformer(nn.Module):
             selected = int(0.634 * x.shape[2])
             x[:,:,selected].data *= 0.
 
+        del self.buffer["state"][:]
+        del self.buffer["action"][:]
+        del self.buffer["action_prob"][:]
+        del self.buffer["state_next"][:]
 
-        # put the data in the queue_reset, for env.reset 
-        self.queue_reset.put(x)
+        # size of buffer["state"]: [12, batch_size, token_num, token_dim]
+        # where 12 is the num of block
         for i, block in enumerate(self.blocks):
 
-            # with self.condition:
-            #     condition.wait()
-            #     # print("RL   : Deit, d u need a mask?")
-            #     print("Deit : yes!")
-            #     condition.notify()
+            # size of x: [bacth_size, token_num, token_dim]
+            self.buffer["state"].append(x)
+            action = np.empty_like(x)
+            action_prob = np.empty_like(x)
+            for i in range(x.shape[0]):
+                act, act_prob = self.agent.select_action(x[i])
+                action[i] = act
+                action_prob[i] = act_prob
 
-            #     conditin.wait()
-            #     # print("RL   : pass me the state please.")
-            #     print("Deit : here u go.")
-            #     self.send_state_to_rl(x)
-            #     condition.notify()
-
-            #     condition.wait()
-            #     # print("RL   : got it! here is the mask that you want.")
-            #     mask = self.get_mask_from_rl()
-            #     # mask = self.get_mask_from_rl_agent(x)
-            #     condition.notify()
-
-            # put data into queue_state
-            self.queue_state.put(x)
-            # get mask from queue mask
-            mask = self.queue_mask.get()
-
-            block.foward(x, mask)
-                        
-
-            # with self.condition:
-            #     print("Deit : step one block with mask done! obs_next give u.")
-            #     self.send_state_to_rl(x)
-            #     condition.notify()
-            #     condition.wait()
-
-            #     # print("RL   : got it! done!")
-            #     print("Deit : done.")
-
-
-
-
+            self.buffer["action"].append(action)
+            self.buffer["action_prob"].append(action_prob)
+            block.foward(x, action)
+            self.buffer["state_next"].append(x)
+            
         x = self.norm(x)
         if self.dist_token is None:
             return self.pre_logits(x[:, 0])
