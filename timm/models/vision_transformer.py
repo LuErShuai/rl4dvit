@@ -182,6 +182,7 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
+        # x: [64, 197, 768]
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
@@ -340,7 +341,9 @@ class VisionTransformer(nn.Module):
             self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
 
     def forward_features(self, x):
+        # x:[64, 3, 224, 224]
         x = self.patch_embed(x)
+        # cls_token: [64, 1, 678]
         cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
         if self.dist_token is None:
             x = torch.cat((cls_token, x), dim=1)

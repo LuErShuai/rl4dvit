@@ -13,9 +13,9 @@ from .helpers import build_model_with_cfg, named_apply, adapt_input_conv
 from .layers import PatchEmbed, Mlp, DropPath, trunc_normal_, lecun_normal_, ACT_Mlp
 from .registry import register_model
 
-from rl.ppo.ppo import PPO
+from rl.ppo import PPO
 
-import numpy sa np
+import numpy as np
 
 _logger = logging.getLogger(__name__)
 
@@ -150,35 +150,6 @@ default_cfgs = {
 
 
 '''
-Attention for Vision Transformer
-'''
-# class Attention(nn.Module):
-#     def __init__(self, dim, num_heads=8, qkv_bias=False, attn_drop=0., proj_drop=0.):
-#         super().__init__()
-#         self.num_heads = num_heads
-#         head_dim = dim // num_heads
-#         self.scale = head_dim ** -0.5
-# 
-#         self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-#         self.attn_drop = nn.Dropout(attn_drop)
-#         self.proj = nn.Linear(dim, dim)
-#         self.proj_drop = nn.Dropout(proj_drop)
-# 
-#     def forward(self, x):
-#         B, N, C = x.shape
-#         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-#         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
-# 
-#         attn = (q @ k.transpose(-2, -1)) * self.scale
-#         attn = attn.softmax(dim=-1)
-#         attn = self.attn_drop(attn)
-# 
-#         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-#         x = self.proj(x)
-#         x = self.proj_drop(x)
-#         return x
-
-'''
 Attention for Dynamic Vision Transformer
 '''
 class Attention(nn.Module):
@@ -199,10 +170,13 @@ class Attention(nn.Module):
 
         self.masked_softmax_bias = -1000 
 
-    def forward(self, x, mask=None)
+    def forward(self, x, mask=None):
         B, N, C = x.shape
         qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
+
+        # size of attn:[batch_size, head_num, token_num, token_num]
+        # -> [64, 12, 197, 197]
         attn = (q @ k.transpose(-2, -1)) * self.scale
 
         if mask is not None:
@@ -210,9 +184,14 @@ class Attention(nn.Module):
 
             # shape of atten: [batch_size, num_heads, token_num, token_num]
             # shape of mask : [batch_size, token_num]
+            # mask: [B, N] -> [64, 197]
+            # 1's are the tokens to continue, 0's are the tokens masked out
+            # mask: [B, 1, 1, N] -> [64, 1, 1, 197]
 
-            # Warning: This Mask to block out token seems wrong
-            attn = attn + mask.view(mask.shape[0], 1, 1, mask.shape[1]) * self.masked_softmax_bias
+            # mask = torch.from_numpy(mask).cuda().view(mask.shape[0], 1, 1, mask.shape[1]) 
+            mask = torch.tensor(mask, dtype=attn.dtype, device=attn.device)
+            mask = mask.view(mask.shape[0], 1, 1, mask.shape[1])
+            attn = attn + mask * self.masked_softmax_bias
             # this additional bias will make attention associated with this token to be zeroed out
             # this incurs at each head, making sure all embedding sections of other tokens ignore these tokens
 
@@ -225,36 +204,6 @@ class Attention(nn.Module):
 
         return x
 
-'''
-Block for Vision Transformer
-'''
-# class Block(nn.Module):
-# 
-#     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, drop=0., attn_drop=0.,
-#                  drop_path=0., act_layer=nn.GELU, norm_layer=nn.LayerNorm, args=None):
-#         super().__init__()
-#         self.norm1 = norm_layer(dim)
-#         self.attn = Attention(dim, num_heads=num_heads, qkv_bias=qkv_bias, attn_drop=attn_drop, proj_drop=drop)
-#         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
-#         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
-#         self.norm2 = norm_layer(dim)
-#         mlp_hidden_dim = int(dim * mlp_ratio)
-#         self.mlp = Mlp(in_features=dim, hidden_features=mlp_hidden_dim, act_layer=act_layer, drop=drop)
-#         self.h_gate = ACT_Mlp(in_features=192, hidden_features=96, out_features=1, act_layer=act_layer, args=args)
-# 
-#         self.args=args
-# 
-#     def forward(self, x):
-#         x = x + self.drop_path(self.attn(self.norm1(x)))
-#         x = x + self.drop_path(self.mlp(self.norm2(x)))
-#         if 0:
-#             x.data[:,0,0] *= 0.
-#             x.data[:,0,0] -= 3.
-# 
-#         if 0:
-#             tmp = self.h_gate(x)
-# 
-#         return x
 
 '''
 Block for Dynamic Vision Transformer
@@ -291,168 +240,26 @@ class Block(nn.Module):
                           # N: token_num
                           # C: token_dim
 
-        # mask: [B, N] 
-        # 0's are the tokens to continue, 1's are the tokens masked out
+        # mask: [B, N] -> [64, 197]
+        # 1's are the tokens to continue, 0's are the tokens masked out
         if mask is None:
             x = x + self.drop_path(self.attn(self.norm1(x)))
             x = x + self.drop_path(self.mlp(self.norm2(x)))
         else:
             # need more specify explain
-            x = x + self.drop_path(self.attn(self.norm1(x*(1-mask).view(B, N, 1))
-                *(1-mask).view(B, N, 1), mask=mask))
-            x = x + self.drop_path(self.mlp(self.norm2(x*(1-mask).view(B, N, 1))
-                *(1-mask).view(B, N, 1)))
+            # zero-out tokens by mask, there is no need to execute zero-out
+            # mask = torch.from_numpy(mask).cuda().view(B, N, 1)
+            x = x + self.drop_path(self.attn(self.norm1(x), mask=mask))
+            x = x + self.drop_path(self.mlp(self.norm2(x)))
 
         return x
 
 
-'''
-Deit Implementation
-'''
-# class VisionTransformer(nn.Module):
-# 
-#     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
-#                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
-#                  drop_rate=0., attn_drop_rate=0., drop_path_rate=0., embed_layer=PatchEmbed, norm_layer=None,
-#                  act_layer=None, weight_init='', args=None):
-#         """
-#         Args:
-#             img_size (int, tuple): input image size
-#             patch_size (int, tuple): patch size
-#             in_chans (int): number of input channels
-#             num_classes (int): number of classes for classification head
-#             embed_dim (int): embedding dimension
-#             depth (int): depth of transformer
-#             num_heads (int): number of attention heads
-#             mlp_ratio (int): ratio of mlp hidden dim to embedding dim
-#             qkv_bias (bool): enable bias for qkv if True
-#             representation_size (Optional[int]): enable and set representation layer (pre-logits) to this value if set
-#             distilled (bool): model includes a distillation token and head as in DeiT models
-#             drop_rate (float): dropout rate
-#             attn_drop_rate (float): attention dropout rate
-#             drop_path_rate (float): stochastic depth rate
-#             embed_layer (nn.Module): patch embedding layer
-#             norm_layer: (nn.Module): normalization layer
-#             weight_init: (str): weight init scheme
-#         """
-#         super().__init__()
-#         self.num_classes = num_classes
-#         self.num_features = self.embed_dim = embed_dim  # num_features for consistency with other models
-#         self.num_tokens = 2 if distilled else 1
-#         norm_layer = norm_layer or partial(nn.LayerNorm, eps=1e-6)
-#         act_layer = act_layer or nn.GELU
-# 
-#         self.patch_embed = embed_layer(
-#             img_size=img_size, patch_size=patch_size, in_chans=in_chans, embed_dim=embed_dim)
-#         num_patches = self.patch_embed.num_patches
-# 
-#         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-#         self.dist_token = nn.Parameter(torch.zeros(1, 1, embed_dim)) if distilled else None
-#         self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + self.num_tokens, embed_dim))
-#         self.pos_drop = nn.Dropout(p=drop_rate)
-# 
-#         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, depth)]  # stochastic depth decay rule
-#         self.blocks = nn.Sequential(*[
-#             Block(
-#                 dim=embed_dim, num_heads=num_heads, mlp_ratio=mlp_ratio, qkv_bias=qkv_bias, drop=drop_rate,
-#                 attn_drop=attn_drop_rate, drop_path=dpr[i], norm_layer=norm_layer, act_layer=act_layer, args=args)
-#             for i in range(depth)])
-#         self.norm = norm_layer(embed_dim)
-# 
-#         # Representation layer
-#         if representation_size and not distilled:
-#             self.num_features = representation_size
-#             self.pre_logits = nn.Sequential(OrderedDict([
-#                 ('fc', nn.Linear(embed_dim, representation_size)),
-#                 ('act', nn.Tanh())
-#             ]))
-#         else:
-#             self.pre_logits = nn.Identity()
-# 
-#         # Classifier head(s)
-#         self.head = nn.Linear(self.num_features, num_classes) if num_classes > 0 else nn.Identity()
-#         self.head_dist = None
-#         if distilled:
-#             self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
-# 
-#         self.init_weights(weight_init)
-# 
-# 
-#     def init_weights(self, mode=''):
-#         assert mode in ('jax', 'jax_nlhb', 'nlhb', '')
-#         head_bias = -math.log(self.num_classes) if 'nlhb' in mode else 0.
-#         trunc_normal_(self.pos_embed, std=.02)
-#         if self.dist_token is not None:
-#             trunc_normal_(self.dist_token, std=.02)
-#         if mode.startswith('jax'):
-#             # leave cls token as zeros to match jax impl
-#             named_apply(partial(_init_vit_weights, head_bias=head_bias, jax_impl=True), self)
-#         else:
-#             trunc_normal_(self.cls_token, std=.02)
-#             self.apply(_init_vit_weights)
-# 
-#     def _init_weights(self, m):
-#         # this fn left here for compat with downstream users
-#         _init_vit_weights(m)
-# 
-#     @torch.jit.ignore()
-#     def load_pretrained(self, checkpoint_path, prefix=''):
-#         _load_weights(self, checkpoint_path, prefix)
-# 
-#     @torch.jit.ignore
-#     def no_weight_decay(self):
-#         return {'pos_embed', 'cls_token', 'dist_token'}
-# 
-#     def get_classifier(self):
-#         if self.dist_token is None:
-#             return self.head
-#         else:
-#             return self.head, self.head_dist
-# 
-#     def reset_classifier(self, num_classes, global_pool=''):
-#         self.num_classes = num_classes
-#         self.head = nn.Linear(self.embed_dim, num_classes) if num_classes > 0 else nn.Identity()
-#         if self.num_tokens == 2:
-#             self.head_dist = nn.Linear(self.embed_dim, self.num_classes) if num_classes > 0 else nn.Identity()
-# 
-#     def forward_features(self, x):
-#         x = self.patch_embed(x)
-#         cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
-#         if self.dist_token is None:
-#             x = torch.cat((cls_token, x), dim=1)
-#         else:
-#             x = torch.cat((cls_token, self.dist_token.expand(x.shape[0], -1, -1), x), dim=1)
-#         x = self.pos_drop(x + self.pos_embed)
-# 
-#         if 0:
-#             selected = int(0.634 * x.shape[2])
-#             x[:,:,selected].data *= 0.
-# 
-#         x = self.blocks(x)
-# 
-#         x = self.norm(x)
-#         if self.dist_token is None:
-#             return self.pre_logits(x[:, 0])
-#         else:
-#             return x[:, 0], x[:, 1]
-# 
-#     def forward(self, x):
-#         x = self.forward_features(x)
-#         if self.head_dist is not None:
-#             x, x_dist = self.head(x[0]), self.head_dist(x[1])  # x must be a tuple
-#             if self.training and not torch.jit.is_scripting():
-#                 # during inference, return the average of both classifier predictions
-#                 return x, x_dist
-#             else:
-#                 return (x + x_dist) / 2
-#         else:
-#             x = self.head(x)
-#         return x
 
 '''
 Dynamic Vision Transformer based on Deit
 '''
-class DynamicVisionTransformer(nn.Module):
+class VisionTransformer(nn.Module):
 
     def __init__(self, img_size=224, patch_size=16, in_chans=3, num_classes=1000, embed_dim=768, depth=12,
                  num_heads=12, mlp_ratio=4., qkv_bias=True, representation_size=None, distilled=False,
@@ -473,7 +280,8 @@ class DynamicVisionTransformer(nn.Module):
             representation_size (Optional[int]): enable and set representation layer (pre-logits) to this value if set
             distilled (bool): model includes a distillation token and head as in DeiT models
             drop_rate (float): dropout rate
-            attn_drop_rate (float): attention dropout rate
+            attn_droTensor for 'out' is on CPU, Tensor for argument #1 'self' is on CPU, but expected t
+hem to be on GPU p_rate (float): attention dropout rate
             drop_path_rate (float): stochastic depth rate
             embed_layer (nn.Module): patch embedding layer
             norm_layer: (nn.Module): normalization layer
@@ -522,8 +330,7 @@ class DynamicVisionTransformer(nn.Module):
         self.init_weights(weight_init)
 
         self.agent = PPO()
-        self.buffer = 
-        {
+        self.buffer = {
             "state":[],
             "state_next":[],
             "action":[],
@@ -581,27 +388,34 @@ class DynamicVisionTransformer(nn.Module):
             selected = int(0.634 * x.shape[2])
             x[:,:,selected].data *= 0.
 
-        del self.buffer["state"][:]
-        del self.buffer["action"][:]
-        del self.buffer["action_prob"][:]
-        del self.buffer["state_next"][:]
+        # del self.buffer["state"][:]
+        # del self.buffer["action"][:]
+        # del self.buffer["action_prob"][:]
+        # del self.buffer["state_next"][:]
 
         # size of buffer["state"]: [12, batch_size, token_num, token_dim]
         # where 12 is the num of block
         for i, block in enumerate(self.blocks):
 
             # size of x: [bacth_size, token_num, token_dim]
+            # -> [64, 197, 168]
+            # size of action:[batch_size, token_num] -> [64, 197]
+            # size of action_prob: [batch_size, token_num, action_dim] -> [64, 197, 2]
+            batch_size, token_num, token_dim = x.shape[0], x.shape[1], x.shape[2]
             self.buffer["state"].append(x)
-            action = np.empty_like(x)
-            action_prob = np.empty_like(x)
-            for i in range(x.shape[0]):
+            action = np.empty(shape=[0, token_num])
+            action_prob = np.empty(shape=[0, token_num, 2])
+            for i in range(batch_size):
+                # size of act:[token_num] -> [197]
+                # size of act_prob: [token_num, action_dim] -> [197, 2]
                 act, act_prob = self.agent.select_action(x[i])
-                action[i] = act
-                action_prob[i] = act_prob
+                action = np.append(action, [act.cpu().numpy()], axis=0)
+                action_prob = np.append(action_prob, [act_prob.cpu().numpy()],
+                                           axis=0)
 
             self.buffer["action"].append(action)
             self.buffer["action_prob"].append(action_prob)
-            block.foward(x, action)
+            block.forward(x, action)
             self.buffer["state_next"].append(x)
             
         x = self.norm(x)
@@ -822,18 +636,6 @@ def vit_tiny_patch16_384(pretrained=False, **kwargs):
     model = _create_vision_transformer('vit_tiny_patch16_384', pretrained=pretrained, **model_kwargs)
     return model
 
-
-@register_model
-def vit_small_patch32_224(3090 ti的显卡功能：
-
-七彩虹iGameGeForceRTX 3090 Ti Vulcan OC显卡的散热采用了iGamepretrained=False, **kwargs):
-    """ ViT-Small (ViT-S/32)
-    """
-    model_kwargs = dict(patch_size=32, embed_dim=384, depth=12, num_heads=6, **kwargs)
-    model = _create_vision_transformer('vit_small_patch32_224', pretrained=pretrained, **model_kwargs)
-    return model
-
-
 @register_model
 def vit_small_patch32_384(pretrained=False, **kwargs):
     """ ViT-Small (ViT-S/32) at 384x384.
@@ -1053,6 +855,14 @@ def deit_small_patch16_224(pretrained=False, **kwargs):
     model = _create_vision_transformer('deit_small_patch16_224', pretrained=pretrained, **model_kwargs)
     return model
 
+@register_model
+def rl4dvit_base_patch16_224(pretrained=False, **kwargs):
+    """ DeiT base model @ 224x224 from paper (https://arxiv.org/abs/2012.12877).
+    ImageNet-1k weights from https://github.com/facebookresearch/deit.
+    """
+    model_kwargs = dict(patch_size=16, embed_dim=768, depth=12, num_heads=12, **kwargs)
+    model = _create_vision_transformer('deit_base_patch16_224', pretrained=pretrained, **model_kwargs)
+    return model
 
 @register_model
 def deit_base_patch16_224(pretrained=False, **kwargs):

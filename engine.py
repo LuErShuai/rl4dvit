@@ -15,6 +15,7 @@ from timm.utils import accuracy, ModelEma
 from losses import DistillationLoss
 import utils
 
+from collections import namedtuple
 
 def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -45,22 +46,33 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         loss_value = loss.item()
 
         # train agent
-        classify_results = outputs - targets
-
+        # classify_results = outputs - targets
+        _, outputs_max_index = outputs.max(dim=1)
+        _, targets_max_index = targets.max(dim=1)
+        # self.buffer = 
+        # {
+        #     "state":[], -> [block_num, batch_size, token_num, token_dim]
+        #     "state_next":[], 
+        #     "action":[],
+        #     "action_prob":[]
+        # }
         Transition = namedtuple('Transition', ['state', 'action',  'a_log_prob', 'reward', 'next_state'])
         buffers = model.buffer
 
-        batch_size = buffers["state"].shape[0]
+        batch_size = buffers["state"][0].shape[0]
         block_num  = len(buffers)
         for i in range(batch_size):
-            classify_result = classify_results[i]
+            if outputs_max_index[i] == targets_max_index[i]:
+                classify_correct = True 
+            else:
+                classify_correct = False
             for j in range(block_num):
                 # size of buffer["state"]: [block_num, batch_size, token_num, token_dim]
                 state = buffers["state"][j][i]
                 action = buffers["action"][j][i]
                 action_prob = buffers["action_prob"][j][i]
                 state_next  = buffers["state_next"][j][i]
-                reward = calulate_reward(j, classify_result, action)
+                reward = caculate_reward(j, classify_result, action)
             
                 trans = Transition(state, action, action_prob, reward, next_state)
                 model.agent.store_transition(trans)
@@ -99,7 +111,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 def caculate_reward(num_block, classify_result, action):
     reward_for_classify = 1 
     # simplest: split equally
-    if classify_result = 0:
+    if classify_result == 0:
         reward_1 = reward_for_classify/12
     else:
         reward_1 = -reward_for_classify/12

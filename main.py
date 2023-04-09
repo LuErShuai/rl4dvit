@@ -23,8 +23,10 @@ from losses import DistillationLoss
 from samplers import RASampler
 from augment import new_data_aug_generator
 
-import models
-import models_v2
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+# import models
+# import models_v2
 
 import utils
 
@@ -36,7 +38,7 @@ def get_args_parser():
     parser.add_argument('--unscale-lr', action='store_true')
 
     # Model parameters
-    parser.add_argument('--model', default='deit_base_patch16_224', type=str, metavar='MODEL',
+    parser.add_argument('--model', default='rl4dvit_base_patch16_224', type=str, metavar='MODEL',
                         help='Name of model to train')
     parser.add_argument('--input-size', default=224, type=int, help='images input size')
 
@@ -47,7 +49,7 @@ def get_args_parser():
 
     parser.add_argument('--model-ema', action='store_true')
     parser.add_argument('--no-model-ema', action='store_false', dest='model_ema')
-    parser.set_defaults(model_ema=True)
+    parser.set_defaults(model_ema=False)
     parser.add_argument('--model-ema-decay', type=float, default=0.99996, help='')
     parser.add_argument('--model-ema-force-cpu', action='store_true', default=False, help='')
 
@@ -150,7 +152,7 @@ def get_args_parser():
     parser.add_argument('--attn-only', action='store_true') 
     
     # Dataset parameters
-    parser.add_argument('--data-path', default='/datasets01/imagenet_full_size/061417/', type=str,
+    parser.add_argument('--data-path', default='../imagenet', type=str,
                         help='dataset path')
     parser.add_argument('--data-set', default='IMNET', choices=['CIFAR', 'IMNET', 'INAT', 'INAT19'],
                         type=str, help='Image Net dataset path')
@@ -158,7 +160,7 @@ def get_args_parser():
                         choices=['kingdom', 'phylum', 'class', 'order', 'supercategory', 'family', 'genus', 'name'],
                         type=str, help='semantic granularity')
 
-    parser.add_argument('--output_dir', default='',
+    parser.add_argument('--output_dir', default='./weight',
                         help='path where to save, empty for no saving')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')

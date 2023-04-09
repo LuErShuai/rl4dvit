@@ -41,7 +41,7 @@ from .visformer import *
 from .vision_transformer import *
 
 # LuDaShuai added
-# from .vision_transformer_dynamic import *
+from .vision_transformer_dynamic import *
 
 #Danny added
 # from .act_vision_transformer import *
