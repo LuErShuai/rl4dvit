@@ -60,30 +60,62 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         buffers = model.buffer
 
         batch_size = buffers["state"][0].shape[0]
-        block_num  = len(buffers)
+        token_num  = buffers["state"][0].shape[1]
+        block_num  = len(buffers["state"])
         for i in range(batch_size):
             if outputs_max_index[i] == targets_max_index[i]:
                 classify_correct = True 
             else:
                 classify_correct = False
-            for j in range(block_num):
-                # size of buffer["state"]: [block_num, batch_size, token_num, token_dim]
-                state = buffers["state"][j][i]
-                action = buffers["action"][j][i]
-                action_prob = buffers["action_prob"][j][i]
-                state_next  = buffers["state_next"][j][i]
-                reward = caculate_reward(j, classify_result, action)
-            
-                trans = Transition(state, action, action_prob, reward, next_state)
-                model.agent.store_transition(trans)
 
-            # one image with 12 block
-            # which means 12 step/transition for rl
-            # after 12 transition store into agent.buffer
-            # mean this trajecotry for rl is done
-            # so the update should being excuted
-            if len(model.agent.buffer) > model.agent.batch_size:
-                model.agent.update()
+            for j in range(token_num):
+                del model.agent.buffer[:] # clear experience
+                for k in range(block_num):
+                    mask = buffers["mask"][k][i][j]
+                    if mask == 0:
+                        break
+                    # size of buffers["state"]: [block_num, batch_size, token_num, token_dim]
+                    state = buffers["state"][k][i][j]
+                    action = buffers["action"][k][i][j]
+                    action_prob = buffers["action_prob"][k][i][j]
+                    state_next = buffers["state_next"][k][i][j]
+
+                    reward = caculate_reward_per_step(j, classify_correct,
+                                                       action)
+                    trans = Transition(state.detach().cpu().numpy(), action, action_prob,
+                                       reward, state_next.detach().cpu().numpy())
+                    model.agent.store_transition(trans)
+                
+                if len(model.agent.buffer) > model.agent.batch_size:
+                    model.agent.update()
+
+
+
+
+            # for j in range(block_num):
+            #     # size of buffer["state"]: [block_num, batch_size, token_num, token_dim]
+            #     # size of state: [token_num, token_dim]
+            #     state = buffers["state"][j][i]
+            #     action = buffers["action"][j][i]
+            #     action_prob = buffers["action_prob"][j][i]
+            #     state_next  = buffers["state_next"][j][i]
+            #     # reward = caculate_reward(j, classify_correct, action)
+
+            #     token_num = state.shape[0]
+            #     for k in range(token_num):
+            #         reward = caculate_reward_per_token(j, classify_correct,
+            #                                            action[k])
+            #         trans = Transition(state[k], action[k], action_prob[k],
+            #                            reward, next_state[k])
+            #         model.agent.store_transition(trans)
+
+            #         # one image with 12 block
+            #         # which means 12 step/transition for rl
+            #         # after 12 transition store into agent.buffer
+            #         # mean this trajecotry for rl is done
+            #         # so the update should being excuted
+            #         if len(model.agent.buffer) > model.agent.batch_size:
+            #             model.agent.update()
         
 
         if not math.isfinite(loss_value):
@@ -108,22 +140,45 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-def caculate_reward(num_block, classify_result, action):
-    reward_for_classify = 1 
+def caculate_reward_per_step(num_block, classify_correct, action):
+    reward_for_classify = 24 
+    reward_for_action = 1
     # simplest: split equally
-    if classify_result == 0:
+    if classify_correct:
         reward_1 = reward_for_classify/12
     else:
         reward_1 = -reward_for_classify/12
 
-    reward_for_action = 0.1
-    reward_2 = 0
+    reward_2 = (1 - action)*reward_for_action
+
+    return reward_1 + reward_2
+
+def caculate_reward(num_block, classify_correct, action):
+    # size of action: [token_num] -> 197
+    # action for 197 tokens in one image
+
+    # if image classdify correctly, reward = reward_1
+    # if the token is discarded,    reward = reward_2
+
+    reward_for_classify = 24 
+    # simplest: split equally
+    if classify_correct:
+        reward_1 = reward_for_classify/12
+    else:
+        reward_1 = -reward_for_classify/12
+
+    reward_for_action = 1
+    reward = torch.empty(action.shape, device=action.device)
     for i in range(len(action)):
         # action: 0:discard token 
         #         1:keep token
+        reward_2 = 0
         reward_2 += (1 - action[i])*reward_for_action
+
+        reward_total = reward_1 + reward_2
+        reward[i] = reward_total 
         
-    return reward_1 + reward_2
+    return reward
 
 @torch.no_grad()
 def evaluate(data_loader, model, device):

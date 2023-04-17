@@ -60,9 +60,9 @@ class Critic(nn.Module):
 class PPO(nn.Module):
     clip_param = 0.2
     max_grad_norm = 0.5
-    ppo_update_time = 2
+    ppo_update_time = 5
     buffer_capacity = 12
-    batch_size = 4 
+    batch_size = 4
 
     def __init__(self):
         super(PPO, self).__init__()
@@ -91,7 +91,28 @@ class PPO(nn.Module):
         # size of action:[token_num]
         # -> [197]
         action = c.sample()
-        return action, action_prob
+        # return action, action_prob
+        return action.item(), action_prob[:,action.item()].item()
+
+
+    def select_action_batch(self, state):
+        # state = torch.from_numpy(state).float().unsqueeze(0)
+        # size of state:[token_num, token_dim]
+        # -> [197, 768]
+        with torch.no_grad():
+            # size of action_prob:[token_n]um, action_dim]
+            # -> [197, 2]
+            action_prob = self.actor_net(state)
+        c = Categorical(action_prob)
+        # size of action:[token_num]
+        # -> [197]
+        action_batch = c.sample()
+        action_prob_batch = torch.empty(action_prob.shape[0],
+                                        device=action_batch.device)
+        for i in range(action_batch.shape[0]):
+            action_prob_batch[i] = action_prob[i, action_batch[i]]
+
+        return action_batch, action_prob_batch
         # return action.item(), action_prob[:,action.item()].item()
 
     def get_value(self, state):
@@ -110,22 +131,26 @@ class PPO(nn.Module):
 
 
     def update(self):
-        state = torch.tensor([t.state for t in self.buffer], dtype=torch.float)
-        action = torch.tensor([t.action for t in self.buffer], dtype=torch.long).view(-1, 1)
+        state = torch.tensor([t.state for t in self.buffer], dtype=torch.float).cuda()
+        # state = [t.state for t in self.buffer]
+        action = torch.tensor([t.action for t in self.buffer], dtype=torch.long).view(-1, 1).cuda()
         reward = [t.reward for t in self.buffer]
         # update: don't need next_state
         #reward = torch.tensor([t.reward for t in self.buffer], dtype=torch.float).view(-1, 1)
         #next_state = torch.tensor([t.next_state for t in self.buffer], dtype=torch.float)
-        old_action_log_prob = torch.tensor([t.a_log_prob for t in self.buffer], dtype=torch.float).view(-1, 1)
+        old_action_log_prob = torch.tensor([t.a_log_prob for t in self.buffer],
+                                           dtype=torch.float).view(-1, 1).cuda()
 
         R = 0
         Gt = []
         for r in reward[::-1]:
             R = r + gamma * R
             Gt.insert(0, R)
-        Gt = torch.tensor(Gt, dtype=torch.float)
+        Gt = torch.tensor(Gt, dtype=torch.float).cuda()
         #print("The agent is updateing....")
         for i in range(self.ppo_update_time):
+            a = BatchSampler(SubsetRandomSampler(range(len(self.buffer))),
+                             self.batch_size, False)
             for index in BatchSampler(SubsetRandomSampler(range(len(self.buffer))), self.batch_size, False):
                 # if self.training_step % 1000 ==0:
                     # print('I_ep {} ，train {} times'.format(i_ep,self.training_step))

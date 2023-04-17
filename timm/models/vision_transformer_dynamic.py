@@ -331,11 +331,13 @@ hem to be on GPU p_rate (float): attention dropout rate
 
         self.agent = PPO()
         self.buffer = {
-            "state":[],
+            "state":[], #[block_num, batch_size, token_num, token_dim]
             "state_next":[],
             "action":[],
-            "action_prob":[]
+            "action_prob":[],
+            "mask":[]
         }
+       self.mask = None
 
     def init_weights(self, mode=''):
         assert mode in ('jax', 'jax_nlhb', 'nlhb', '')
@@ -388,34 +390,45 @@ hem to be on GPU p_rate (float): attention dropout rate
             selected = int(0.634 * x.shape[2])
             x[:,:,selected].data *= 0.
 
-        # del self.buffer["state"][:]
-        # del self.buffer["action"][:]
-        # del self.buffer["action_prob"][:]
-        # del self.buffer["state_next"][:]
+        del self.buffer["state"][:]
+        del self.buffer["action"][:]
+        del self.buffer["action_prob"][:]
+        del self.buffer["state_next"][:]
 
         # size of buffer["state"]: [12, batch_size, token_num, token_dim]
         # where 12 is the num of block
+        batch_size, token_num, token_dim = x.shape[0], x.shape[1], x.shape[2]
+        mask = torch.ones(batch_size, token_num) 
         for i, block in enumerate(self.blocks):
 
             # size of x: [bacth_size, token_num, token_dim]
             # -> [64, 197, 168]
             # size of action:[batch_size, token_num] -> [64, 197]
             # size of action_prob: [batch_size, token_num, action_dim] -> [64, 197, 2]
-            batch_size, token_num, token_dim = x.shape[0], x.shape[1], x.shape[2]
             self.buffer["state"].append(x)
             action = np.empty(shape=[0, token_num])
-            action_prob = np.empty(shape=[0, token_num, 2])
+            action_prob = np.empty(shape=[0, token_num])
             for i in range(batch_size):
                 # size of act:[token_num] -> [197]
                 # size of act_prob: [token_num, action_dim] -> [197, 2]
-                act, act_prob = self.agent.select_action(x[i])
+                act, act_prob = self.agent.select_action_batch(x[i])
                 action = np.append(action, [act.cpu().numpy()], axis=0)
                 action_prob = np.append(action_prob, [act_prob.cpu().numpy()],
                                            axis=0)
+                for j in range(token_num):
+                    if self.dist_token is None:
+                        if j > 0:
+                            mask[i][j] = 0
+                    else:
+                        if j > 1:
+                            mask[i][j] = 0
 
             self.buffer["action"].append(action)
             self.buffer["action_prob"].append(action_prob)
-            block.forward(x, action)
+            self.buffer["mask"].append(mask)
+
+             
+            block.forward(x, mask)
             self.buffer["state_next"].append(x)
             
         x = self.norm(x)
