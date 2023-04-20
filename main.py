@@ -110,6 +110,11 @@ def get_args_parser():
     parser.add_argument('--train-mode', action='store_true')
     parser.add_argument('--no-train-mode', action='store_false', dest='train_mode')
     parser.set_defaults(train_mode=True)
+
+    parser.add_argument('--train_deit', action='store_true')
+    parser.set_defaults(train_deit=False)
+    parser.add_argument('--train_agent', action='store_true')
+    parser.set_defaults(train_agent=False)
     
     parser.add_argument('--ThreeAugment', action='store_true') #3augment
     
@@ -267,7 +272,7 @@ def main(args):
         img_size=args.input_size
     )
 
-                    
+
     if args.finetune:
         if args.finetune.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
@@ -346,7 +351,32 @@ def main(args):
     if not args.unscale_lr:
         linear_scaled_lr = args.lr * args.batch_size * utils.get_world_size() / 512.0
         args.lr = linear_scaled_lr
+
+    for param in model.parameters():
+        param.requires_grad = False
+    # if args.train_deit:
+    #     for name in model.state_dict():
+    #         if 'agent' not in name:
+    #             for param in model[name].parameters():
+    #                 param.requires_grad = True
+
+    # if args.train_agent:
+    #     for name in model.state_dict():
+    #         if 'agent' in name:
+    #             for param in model[name].parameters():
+    #                 param.requires_grad = True
+
+    for name, param in model.named_parameters():
+        if args.train_deit:
+            if 'agent' not in name:
+                param.requires_grad = True
+        if args.train_agent:
+            if 'agent' in name:
+                param.requires_grad = True
+
     optimizer = create_optimizer(args, model_without_ddp)
+    # optimizer = create_optimizer(args, filter(lambda p: p.requires_grad,
+    #                                           model_without_ddp.parameters()))
     loss_scaler = NativeScaler()
 
     lr_scheduler, _ = create_scheduler(args, optimizer)
@@ -396,7 +426,30 @@ def main(args):
                 args.resume, map_location='cpu', check_hash=True)
         else:
             checkpoint = torch.load(args.resume, map_location='cpu')
-        model_without_ddp.load_state_dict(checkpoint['model'])
+
+        # if args.train_agent_only:
+        #     checkpoint_model = checkpoint['model']
+        #     state_dict = model.state_dict()
+        #     for name in state_dict:
+        #         if 'agent' in name:
+        #             continue
+        #         else:
+        #             state_dict[name] = checkpoint['model'][name]
+        #     model_without_ddp.load_state_dict(state_dict)
+        # else:
+        #     model_without_ddp.load_state_dict(checkpoint['model'])
+
+        checkpoint_model = checkpoint['model']
+        state_dict = model.state_dict()
+        for name in state_dict:
+            if 'agent' not in name:
+                state_dict[name] = checkpoint['model'][name]
+        model_without_ddp.load_state_dict(state_dict)
+
+        # if not args.train-agent:
+            # load agent weights from pth
+
+        
         if not args.eval and 'optimizer' in checkpoint and 'lr_scheduler' in checkpoint and 'epoch' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer'])
             lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
@@ -406,10 +459,13 @@ def main(args):
             if 'scaler' in checkpoint:
                 loss_scaler.load_state_dict(checkpoint['scaler'])
         lr_scheduler.step(args.start_epoch)
-    if args.eval:
-        test_stats = evaluate(data_loader_val, model, device)
-        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-        return
+
+    # if args.eval:
+    #     test_stats = evaluate(data_loader_val, model, device)
+    #     print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+    #     return
+
+
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()

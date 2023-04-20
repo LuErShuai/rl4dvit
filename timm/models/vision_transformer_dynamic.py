@@ -168,7 +168,7 @@ class Attention(nn.Module):
                          # dimension is indication of token exec.
                          # 0's are the tokens to continue, 1's are the tokens masked out
 
-        self.masked_softmax_bias = -1000 
+        self.masked_softmax_bias = -10000
 
     def forward(self, x, mask=None):
         B, N, C = x.shape
@@ -337,7 +337,7 @@ hem to be on GPU p_rate (float): attention dropout rate
             "action_prob":[],
             "mask":[]
         }
-       self.mask = None
+        self.mask = None
 
     def init_weights(self, mode=''):
         assert mode in ('jax', 'jax_nlhb', 'nlhb', '')
@@ -417,10 +417,10 @@ hem to be on GPU p_rate (float): attention dropout rate
                                            axis=0)
                 for j in range(token_num):
                     if self.dist_token is None:
-                        if j > 0:
+                        if j > 0 and act[j] == 0:
                             mask[i][j] = 0
                     else:
-                        if j > 1:
+                        if j > 1 and act[j] == 0:
                             mask[i][j] = 0
 
             self.buffer["action"].append(action)

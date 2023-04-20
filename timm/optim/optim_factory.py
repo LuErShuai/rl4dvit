@@ -106,6 +106,7 @@ def create_optimizer_v2(
         weight_decay = 0.
     else:
         parameters = model.parameters()
+    # b = filter(lambda p: p.requires_grad, parameters)
     if 'fused' in opt_lower:
         assert has_apex and torch.cuda.is_available(), 'APEX and CUDA required for fused optimizers'
 

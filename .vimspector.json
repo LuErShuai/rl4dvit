@@ -57,7 +57,7 @@
     "run - argv": {
       "adapter": "debugpy",
       "configuration": {
-        "python": "/home/ludashuai/.conda/envs/network/bin/python",
+        "python": "/home/leo/anaconda3/envs/rl4dvit/bin/python",
         "request": "launch",
         "type": "python",
         "cwd": "${workspaceRoot}",
