@@ -60,7 +60,7 @@ class Critic(nn.Module):
 class PPO(nn.Module):
     clip_param = 0.2
     max_grad_norm = 0.5
-    ppo_update_time = 5
+    ppo_update_time = 1
     buffer_capacity = 12
     batch_size = 4
 
@@ -72,6 +72,8 @@ class PPO(nn.Module):
         self.counter = 0
         self.training_step = 0
         self.writer = SummaryWriter('../exp')
+        self.reward_one_epoch = 0
+        self.reward_one_batch = 0
 
         self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-3)
         self.critic_net_optimizer = optim.Adam(self.critic_net.parameters(), 3e-3)
@@ -122,8 +124,14 @@ class PPO(nn.Module):
         return value.item()
 
     def save_param(self):
-        torch.save(self.actor_net.state_dict(), '../param/net_param/actor_net' + str(time.time())[:10], +'.pkl')
-        torch.save(self.critic_net.state_dict(), '../param/net_param/critic_net' + str(time.time())[:10], +'.pkl')
+        # torch.save(self.actor_net.state_dict(), '../param/net_param/actor_net' + str(time.time())[:10], +'.pkl')
+        # torch.save(self.critic_net.state_dict(), '../param/net_param/critic_net' + str(time.time())[:10], +'.pkl')
+        torch.save(self.actor_net.state_dict(), './param/net_param/actor_net.pkl')
+        torch.save(self.critic_net.state_dict(), './param/net_param/critic_net.pkl')
+        
+    def save_param_best(self):
+        torch.save(self.actor_net.state_dict(), './param/net_param/actor_net_best.pkl')
+        torch.save(self.critic_net.state_dict(), './param/net_param/critic_net_best.pkl')
 
     def store_transition(self, transition):
         self.buffer.append(transition)
@@ -149,9 +157,9 @@ class PPO(nn.Module):
         Gt = torch.tensor(Gt, dtype=torch.float).cuda()
         #print("The agent is updateing....")
         for i in range(self.ppo_update_time):
-            a = BatchSampler(SubsetRandomSampler(range(len(self.buffer))),
-                             self.batch_size, False)
-            for index in BatchSampler(SubsetRandomSampler(range(len(self.buffer))), self.batch_size, False):
+            # for index in BatchSampler(SubsetRandomSampler(range(len(self.buffer))), self.batch_size, False):
+            for index in BatchSampler(SubsetRandomSampler(range(len(self.buffer))),
+                                      len(self.buffer), False):
                 # if self.training_step % 1000 ==0:
                     # print('I_ep {} ，train {} times'.format(i_ep,self.training_step))
                 #with torch.no_grad():

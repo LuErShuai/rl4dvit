@@ -427,25 +427,27 @@ def main(args):
         else:
             checkpoint = torch.load(args.resume, map_location='cpu')
 
-        # if args.train_agent_only:
-        #     checkpoint_model = checkpoint['model']
-        #     state_dict = model.state_dict()
-        #     for name in state_dict:
-        #         if 'agent' in name:
-        #             continue
-        #         else:
-        #             state_dict[name] = checkpoint['model'][name]
-        #     model_without_ddp.load_state_dict(state_dict)
-        # else:
-        #     model_without_ddp.load_state_dict(checkpoint['model'])
 
-        checkpoint_model = checkpoint['model']
+        checkpoint_deit_model = checkpoint['model']
         state_dict = model.state_dict()
+
+        checkpoint_ppo_actor = None
+        if os.path.exists('./param/net_param/actor_net.pkl'):
+            checkpoint_ppo_actor = torch.load('./param/net_param/actor_net.pkl',
+                                    map_location='cpu')
+        checkpoint_ppo_critic = None
+        if os.path.exists('./param/net_param/critic_net.pkl'):
+            checkpoint_ppo_critic = torch.load('./param/net_param/critic_net.pkl',
+                                    map_location='cpu')
+
         for name in state_dict:
             if 'agent' not in name:
                 state_dict[name] = checkpoint['model'][name]
+            if 'agent.actor' in name and checkpoint_ppo_actor is not None:
+                state_dict[name] = checkpoint_ppo_actor['model'][name]
+            if 'agent.critic' in name and checkpoint_ppo_critic is not None:
+                state_dict[name] = checkpoint_ppo_critic['model'][name]
         model_without_ddp.load_state_dict(state_dict)
-
         # if not args.train-agent:
             # load agent weights from pth
 
@@ -460,16 +462,17 @@ def main(args):
                 loss_scaler.load_state_dict(checkpoint['scaler'])
         lr_scheduler.step(args.start_epoch)
 
-    # if args.eval:
-    #     test_stats = evaluate(data_loader_val, model, device)
-    #     print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
-    #     return
+    if args.eval:
+        test_stats = evaluate(data_loader_val, model, device)
+        print(f"Accuracy of the network on the {len(dataset_val)} test images: {test_stats['acc1']:.1f}%")
+        return
 
 
 
     print(f"Start training for {args.epochs} epochs")
     start_time = time.time()
     max_accuracy = 0.0
+    max_reward = 0.0
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -528,6 +531,19 @@ def main(args):
         if args.output_dir and utils.is_main_process():
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
+
+        if utils.is_main_process():
+            model.agent.save_param()
+
+
+        print('PPO Reward one epoch {} : {}'.format(epoch,
+                                                    model.agent.reward_one_epoch))
+        if utiles.is_main_process() and max_reward < model.agent.reward_one_epoch:
+            max_reward = model.agent.reward_one_epoch
+            model.agent.save_param_best()
+
+        
+
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

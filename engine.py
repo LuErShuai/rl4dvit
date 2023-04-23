@@ -26,7 +26,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
-    print_freq = 10
+    print_freq = 1
+    model.agent.reward_one_epoch = 0
 
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
         samples = samples.to(device, non_blocking=True)
@@ -62,6 +63,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         batch_size = buffers["state"][0].shape[0]
         token_num  = buffers["state"][0].shape[1]
         block_num  = len(buffers["state"])
+
+        model.agent.reward_one_batch = 0
         for i in range(batch_size):
             if outputs_max_index[i] == targets_max_index[i]:
                 classify_correct = True 
@@ -85,10 +88,24 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                     trans = Transition(state.detach().cpu().numpy(), action, action_prob,
                                        reward, state_next.detach().cpu().numpy())
                     model.agent.store_transition(trans)
+
+                    model.agent.reward_one_epoch += reward
+                    model.agent.reward_one_batch += reward
                 
-                if len(model.agent.buffer) > model.agent.batch_size:
+                a = len(model.agent.buffer)
+                b = model.agent.batch_size
+                # if len(model.agent.buffer) > model.agent.batch_size:
+                #     model.agent.update()
+                if len(model.agent.buffer) > 0:
                     model.agent.update()
 
+        print('test') 
+        a = model.agent.training_step
+        # if utils.is_main_process() and model.agent.training_step > 50000:
+        if model.agent.training_step > 5000:
+            model.agent.save_param()
+            print("save ppo weight")
+            # return
 
 
 
@@ -122,12 +139,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
 
-        optimizer.zero_grad()
+        if args.train_deit:
+            optimizer.zero_grad()
 
-        # this attribute is added by timm on one optimizer (adahessian)
-        is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-        loss_scaler(loss, optimizer, clip_grad=max_norm,
-                    parameters=model.parameters(), create_graph=is_second_order)
+            # this attribute is added by timm on one optimizer (adahessian)
+            is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+            loss_scaler(loss, optimizer, clip_grad=max_norm, parameters=model.parameters(), create_graph=is_second_order)
 
         torch.cuda.synchronize()
         if model_ema is not None:
@@ -135,6 +152,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
         metric_logger.update(loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
+        metric_logger.meters['reward_batch'].update(model.agent.reward_one_batch, n=batch_size)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
