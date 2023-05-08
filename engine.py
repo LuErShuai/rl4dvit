@@ -16,6 +16,7 @@ from losses import DistillationLoss
 import utils
 
 from collections import namedtuple
+import time
 
 def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -30,6 +31,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     model.agent.reward_one_epoch = 0
 
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
+
+        start = time.perf_counter()
+
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
 
@@ -46,6 +50,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         # size of loss:[batch_size]
         loss_value = loss.item()
 
+        end_1 = time.perf_counter()
         # train agent
         # classify_results = outputs - targets
         _, outputs_max_index = outputs.max(dim=1)
@@ -99,13 +104,19 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                 if len(model.agent.buffer) > 0:
                     model.agent.update()
 
-        print('test') 
-        a = model.agent.training_step
         # if utils.is_main_process() and model.agent.training_step > 50000:
-        if model.agent.training_step > 5000:
+        if model.agent.training_step > 2000:
             model.agent.save_param()
             print("save ppo weight")
             # return
+
+        end_2 = time.perf_counter()
+        run_time_deit = end_1 -start
+        run_time_agent = end_2 - end_1 
+        print("run time deit:", run_time_deit * 1000)
+        print("run time agent:", run_time_agent * 1000)
+
+
 
 
 

@@ -17,6 +17,9 @@ from rl.ppo import PPO
 
 import numpy as np
 
+from pyinstrument import Profiler
+import time 
+
 _logger = logging.getLogger(__name__)
 
 
@@ -390,6 +393,9 @@ hem to be on GPU p_rate (float): attention dropout rate
             selected = int(0.634 * x.shape[2])
             x[:,:,selected].data *= 0.
 
+        
+        start = time.perf_counter()
+
         del self.buffer["state"][:]
         del self.buffer["action"][:]
         del self.buffer["action_prob"][:]
@@ -398,39 +404,83 @@ hem to be on GPU p_rate (float): attention dropout rate
         # size of buffer["state"]: [12, batch_size, token_num, token_dim]
         # where 12 is the num of block
         batch_size, token_num, token_dim = x.shape[0], x.shape[1], x.shape[2]
-        mask = torch.ones(batch_size, token_num) 
+        mask = torch.ones(batch_size, token_num)
+        mask = torch.tensor(mask, dtype=torch.int64)
+
+        end_0 = time.perf_counter()
         for i, block in enumerate(self.blocks):
 
             # size of x: [bacth_size, token_num, token_dim]
             # -> [64, 197, 168]
             # size of action:[batch_size, token_num] -> [64, 197]
             # size of action_prob: [batch_size, token_num, action_dim] -> [64, 197, 2]
+
+            time_2 = time.perf_counter() 
+
             self.buffer["state"].append(x)
             action = np.empty(shape=[0, token_num])
             action_prob = np.empty(shape=[0, token_num])
-            for i in range(batch_size):
+            time_3 = time.perf_counter() 
+
+            
+            for j in range(batch_size):
                 # size of act:[token_num] -> [197]
                 # size of act_prob: [token_num, action_dim] -> [197, 2]
-                act, act_prob = self.agent.select_action_batch(x[i])
+                time_7 = time.perf_counter()
+                act, act_prob = self.agent.select_action_image(x[j])
+                act_prob_ = act_prob.view(197)
                 action = np.append(action, [act.cpu().numpy()], axis=0)
-                action_prob = np.append(action_prob, [act_prob.cpu().numpy()],
+                action_prob = np.append(action_prob, [act_prob_.cpu().numpy()],
                                            axis=0)
-                for j in range(token_num):
-                    if self.dist_token is None:
-                        if j > 0 and act[j] == 0:
-                            mask[i][j] = 0
-                    else:
-                        if j > 1 and act[j] == 0:
-                            mask[i][j] = 0
+                time_8 = time.perf_counter()
 
+                mask_index = torch.nonzero(mask[j])
+                mask_index = mask_index.view(mask_index.shape[0])
+
+                # act_selected_by_index = torch.take(act, mask_index)
+                act_selected_by_index = torch.gather(act.cpu(), 0, mask_index)
+
+                mask[j].scatter_(0, mask_index, act_selected_by_index)
+                mask[j][0] = 1
+
+                # for k in range(token_num):
+                #     if self.dist_token is None:
+                #         if k > 0 and act[k] == 0:
+                #             mask[j][k] = 0
+                #     else:
+                #         if k > 1 and act[k] == 0:
+                #             mask[j][k] = 0
+                time_9 = time.perf_counter()
+                print("time 5:", (time_8 - time_7)*1000)
+                print("time 6:", (time_9 - time_8)*1000)
+
+            # self.buffer["state"].append(x)
+            # time_9 = time.perf_counter()
+            # action, action_prob = self.agent.select_action_batch(x)
+
+            # time_4 = time.perf_counter() 
+
+            # print("time 8:", (time_4 - time_9)*1000)
             self.buffer["action"].append(action)
             self.buffer["action_prob"].append(action_prob)
             self.buffer["mask"].append(mask)
 
+            time_5 = time.perf_counter() 
              
             block.forward(x, mask)
             self.buffer["state_next"].append(x)
+            time_6 = time.perf_counter() 
+            print("time 0:", (time_3 -time_2)*1000)
+            print("time 1:", (time_4 -time_3)*1000)
+            print("time 2:", (time_5 -time_4)*1000)
+            print("time 3:", (time_6 -time_5)*1000)
             
+        end = time.perf_counter()
+        run_time = end - start 
+        run_time_0 = end_0 -start
+        print("run time 0:", run_time_0*1000)
+        print("run time:", run_time * 1000)
+
         x = self.norm(x)
         if self.dist_token is None:
             return self.pre_logits(x[:, 0])

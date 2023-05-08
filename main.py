@@ -24,9 +24,7 @@ from samplers import RASampler
 from augment import new_data_aug_generator
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-# import models
-# import models_v2
+os.environ["CUDA_VISIBLE_DEVICES"] = "3"
 
 import utils
 
@@ -444,9 +442,9 @@ def main(args):
             if 'agent' not in name:
                 state_dict[name] = checkpoint['model'][name]
             if 'agent.actor' in name and checkpoint_ppo_actor is not None:
-                state_dict[name] = checkpoint_ppo_actor['model'][name]
+                state_dict[name] = checkpoint_ppo_actor[name[16:]]
             if 'agent.critic' in name and checkpoint_ppo_critic is not None:
-                state_dict[name] = checkpoint_ppo_critic['model'][name]
+                state_dict[name] = checkpoint_ppo_critic[name[17:]]
         model_without_ddp.load_state_dict(state_dict)
         # if not args.train-agent:
             # load agent weights from pth

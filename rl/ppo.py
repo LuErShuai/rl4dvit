@@ -77,9 +77,9 @@ class PPO(nn.Module):
 
         self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-3)
         self.critic_net_optimizer = optim.Adam(self.critic_net.parameters(), 3e-3)
-        if not os.path.exists('../param'):
-            os.makedirs('../param/net_param')
-            os.makedirs('../param/img')
+        if not os.path.exists('./param'):
+            os.makedirs('./param/net_param')
+            os.makedirs('./param/img')
 
     def select_action(self, state):
         # state = torch.from_numpy(state).float().unsqueeze(0)
@@ -96,8 +96,27 @@ class PPO(nn.Module):
         # return action, action_prob
         return action.item(), action_prob[:,action.item()].item()
 
-
     def select_action_batch(self, state):
+        with torch.no_grad():
+            action_prob = self.actor_net(state)
+
+        batch_size = state.shape[0]
+        token_num = state.shape[1]
+        action_batch = np.empty(shape=[0, token_num])
+            # action = np.empty(shape=[0, token_num])
+        for i in range(batch_size):
+            a = action_prob[i]
+            c_image = Categorical(action_prob[i])
+            action_image = c_image.sample()
+            action_batch = np.append(action_image, [action_image.cpu().numpy()], axis=0)
+        
+        # action_prob_batch = torch.index_select(action_prob, 2, action_batch)
+        index = action_batch.reshape(action_batch.shape[0], action_batch.shape[1],1)
+        action_prob_batch = torch.gather(action_prob, 2, index)
+
+        return action_batch, action_prob_batch
+
+    def select_action_image(self, state):
         # state = torch.from_numpy(state).float().unsqueeze(0)
         # size of state:[token_num, token_dim]
         # -> [197, 768]
@@ -109,11 +128,13 @@ class PPO(nn.Module):
         # size of action:[token_num]
         # -> [197]
         action_batch = c.sample()
-        action_prob_batch = torch.empty(action_prob.shape[0],
-                                        device=action_batch.device)
-        for i in range(action_batch.shape[0]):
-            action_prob_batch[i] = action_prob[i, action_batch[i]]
+        # action_prob_batch = torch.empty(action_prob.shape[0],
+        #                                 device=action_batch.device)
+        # for i in range(action_batch.shape[0]):
+        #     action_prob_batch[i] = action_prob[i, action_batch[i]]
 
+        index = action_batch.reshape(action_batch.shape[0], 1)
+        action_prob_batch = torch.gather(action_prob, 1, index)
         return action_batch, action_prob_batch
         # return action.item(), action_prob[:,action.item()].item()
 
