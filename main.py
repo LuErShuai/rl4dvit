@@ -169,6 +169,7 @@ def get_args_parser():
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
     parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--resume_ppo',action='store_true')
     parser.add_argument('--start_epoch', default=0, type=int, metavar='N',
                         help='start epoch')
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
@@ -430,11 +431,11 @@ def main(args):
         state_dict = model.state_dict()
 
         checkpoint_ppo_actor = None
-        if os.path.exists('./param/net_param/actor_net.pkl'):
+        if args.resume_ppo and os.path.exists('./param/net_param/actor_net.pkl'):
             checkpoint_ppo_actor = torch.load('./param/net_param/actor_net.pkl',
                                     map_location='cpu')
         checkpoint_ppo_critic = None
-        if os.path.exists('./param/net_param/critic_net.pkl'):
+        if args.resume_ppo and os.path.exists('./param/net_param/critic_net.pkl'):
             checkpoint_ppo_critic = torch.load('./param/net_param/critic_net.pkl',
                                     map_location='cpu')
 

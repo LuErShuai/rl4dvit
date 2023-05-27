@@ -19,6 +19,7 @@ import numpy as np
 
 from pyinstrument import Profiler
 import time 
+import pdb
 
 _logger = logging.getLogger(__name__)
 
@@ -194,6 +195,8 @@ class Attention(nn.Module):
             # mask = torch.from_numpy(mask).cuda().view(mask.shape[0], 1, 1, mask.shape[1]) 
             mask = torch.tensor(mask, dtype=attn.dtype, device=attn.device)
             mask = mask.view(mask.shape[0], 1, 1, mask.shape[1])
+            # pdb.set_trace()
+            mask = 1 - mask
             attn = attn + mask * self.masked_softmax_bias
             # this additional bias will make attention associated with this token to be zeroed out
             # this incurs at each head, making sure all embedding sections of other tokens ignore these tokens
@@ -382,7 +385,9 @@ hem to be on GPU p_rate (float): attention dropout rate
     
     def forward_features(self, x):
         x = self.patch_embed(x)
+        a = self.cls_token
         cls_token = self.cls_token.expand(x.shape[0], -1, -1)  # stole cls_tokens impl from Phil Wang, thanks
+        # print(cls_token)
         if self.dist_token is None:
             x = torch.cat((cls_token, x), dim=1)
         else:
@@ -408,6 +413,8 @@ hem to be on GPU p_rate (float): attention dropout rate
         mask = torch.tensor(mask, dtype=torch.int64)
 
         end_0 = time.perf_counter()
+
+        token_depth = 0
         for i, block in enumerate(self.blocks):
 
             # size of x: [bacth_size, token_num, token_dim]
@@ -442,6 +449,7 @@ hem to be on GPU p_rate (float): attention dropout rate
 
                 mask[j].scatter_(0, mask_index, act_selected_by_index)
                 mask[j][0] = 1
+                
 
                 # for k in range(token_num):
                 #     if self.dist_token is None:
@@ -451,14 +459,18 @@ hem to be on GPU p_rate (float): attention dropout rate
                 #         if k > 1 and act[k] == 0:
                 #             mask[j][k] = 0
                 time_9 = time.perf_counter()
-                print("time 5:", (time_8 - time_7)*1000)
-                print("time 6:", (time_9 - time_8)*1000)
+                # print("time 5:", (time_8 - time_7)*1000)
+                # print("time 6:", (time_9 - time_8)*1000)
 
             # self.buffer["state"].append(x)
             # time_9 = time.perf_counter()
             # action, action_prob = self.agent.select_action_batch(x)
 
-            # time_4 = time.perf_counter() 
+            clone_mask = mask.clone()
+            clone_mask_ = clone_mask.view(-1,1)
+            token_depth += sum(torch.squeeze(clone_mask_))
+
+            time_4 = time.perf_counter() 
 
             # print("time 8:", (time_4 - time_9)*1000)
             self.buffer["action"].append(action)
@@ -467,25 +479,33 @@ hem to be on GPU p_rate (float): attention dropout rate
 
             time_5 = time.perf_counter() 
              
-            block.forward(x, mask)
+            x = block.forward(x, mask)
             self.buffer["state_next"].append(x)
             time_6 = time.perf_counter() 
-            print("time 0:", (time_3 -time_2)*1000)
-            print("time 1:", (time_4 -time_3)*1000)
-            print("time 2:", (time_5 -time_4)*1000)
-            print("time 3:", (time_6 -time_5)*1000)
-            
+            # print("time 0:", (time_3 -time_2)*1000)
+            # print("time 1:", (time_4 -time_3)*1000)
+            # print("time 2:", (time_5 -time_4)*1000)
+            # print("time 3:", (time_6 -time_5)*1000)
+        
+        print('LLLLLLLLLLLLLLLLLLLLLLLLLLLLLL')
+        print(token_depth)
         end = time.perf_counter()
         run_time = end - start 
         run_time_0 = end_0 -start
-        print("run time 0:", run_time_0*1000)
-        print("run time:", run_time * 1000)
+        # print("run time 0:", run_time_0*1000)
+        # print("run time:", run_time * 1000)
+
+        # for i, block in enumerate(self.blocks):
+        #     mask = None
+        #     x = block.forward(x, mask)
 
         x = self.norm(x)
-        if self.dist_token is None:
-            return self.pre_logits(x[:, 0])
-        else:
-            return x[:, 0], x[:, 1]
+        # if self.dist_token is None:
+        #     return self.pre_logits(x[:, 0])
+        # else:
+        #     return x[:, 0], x[:, 1]
+        # print(x[:, 0])
+        return x[:, 0]
 
     def forward(self, x):
         x = self.forward_features(x)

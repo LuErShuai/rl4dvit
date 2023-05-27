@@ -124,6 +124,22 @@ class PPO(nn.Module):
             # size of action_prob:[token_n]um, action_dim]
             # -> [197, 2]
             action_prob = self.actor_net(state)
+
+        i= 0
+        if i < 5000:
+            # prob_min = torch.take(action_prob, action_prob.argmin())
+            # action_prob_a = action_prob[:,0] - prob_min
+            # action_prob_b = action_prob[:,1] + prob_min
+            # action_prob = torch.cat((action_prob_a.view(-1,1),
+            #                          action_prob_b.view(-1,1)),1)
+            action_prob_a = action_prob[:, 0] * 0.2
+            action_prob_b = action_prob[:, 1] + action_prob[:, 0] * 0.8
+            action_prob = torch.cat((action_prob_a.view(-1,1),
+                                     action_prob_b.view(-1,1)),1)
+
+            i += 1
+
+
         c = Categorical(action_prob)
         # size of action:[token_num]
         # -> [197]

@@ -69,7 +69,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         token_num  = buffers["state"][0].shape[1]
         block_num  = len(buffers["state"])
 
-        model.agent.reward_one_batch = 0
+        # model.agent.reward_one_batch = 0
+        reward_one_batch = 0
         for i in range(batch_size):
             if outputs_max_index[i] == targets_max_index[i]:
                 classify_correct = True 
@@ -78,13 +79,17 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
             for j in range(token_num):
                 del model.agent.buffer[:] # clear experience
+                token_done = False
                 for k in range(block_num):
                     mask = buffers["mask"][k][i][j]
-                    if mask == 0:
+
+                    if token_done:
                         break
                     # size of buffers["state"]: [block_num, batch_size, token_num, token_dim]
                     state = buffers["state"][k][i][j]
                     action = buffers["action"][k][i][j]
+                    if action  == 0:
+                        token_done = True
                     action_prob = buffers["action_prob"][k][i][j]
                     state_next = buffers["state_next"][k][i][j]
 
@@ -94,11 +99,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                                        reward, state_next.detach().cpu().numpy())
                     model.agent.store_transition(trans)
 
-                    model.agent.reward_one_epoch += reward
-                    model.agent.reward_one_batch += reward
+                    # model.agent.reward_one_epoch += reward
+                    reward_one_batch += reward
+                    
                 
-                a = len(model.agent.buffer)
-                b = model.agent.batch_size
                 # if len(model.agent.buffer) > model.agent.batch_size:
                 #     model.agent.update()
                 if len(model.agent.buffer) > 0:
@@ -113,8 +117,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         end_2 = time.perf_counter()
         run_time_deit = end_1 -start
         run_time_agent = end_2 - end_1 
-        print("run time deit:", run_time_deit * 1000)
-        print("run time agent:", run_time_agent * 1000)
+        # print("run time deit:", run_time_deit * 1000)
+        # print("run time agent:", run_time_agent * 1000)
 
 
 
@@ -163,31 +167,39 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
         metric_logger.update(loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-        metric_logger.meters['reward_batch'].update(model.agent.reward_one_batch, n=batch_size)
+        metric_logger.meters['reward_batch'].update(reward_one_batch, n=batch_size)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 def caculate_reward_per_step(num_block, classify_correct, action):
-    reward_for_classify = 24 
-    reward_for_action = 1
+    reward_for_classify = 12 
+    reward_for_action = 1 
     # simplest: split equally
     if classify_correct:
-        reward_1 = reward_for_classify/12
+        reward_1 = 1
+        # reward_1 = reward_for_classify/12
+        # reward_2 = reward_for_action
+        
+        # reward_3 = (1 - action)*0.1
     else:
-        reward_1 = -reward_for_classify/12
+        # reward_1 = -reward_for_classify/12
+        # reward_2 = - reward_for_action
+        # reward_1 = 0
+        reward_1 = -1
+        # reward_3 = -(1 - action)*0.1
 
-    reward_2 = (1 - action)*reward_for_action
+    reward_3 = (1 - action)*100
+    reward_4 = - num_block * 0.1
 
-    return reward_1 + reward_2
+
+    # return reward_1 + reward_2 + reward_3
+    return reward_1 + reward_3
 
 def caculate_reward(num_block, classify_correct, action):
     # size of action: [token_num] -> 197
     # action for 197 tokens in one image
-
-    # if image classdify correctly, reward = reward_1
-    # if the token is discarded,    reward = reward_2
 
     reward_for_classify = 24 
     # simplest: split equally
