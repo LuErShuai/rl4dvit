@@ -28,7 +28,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 1
-    model.agent.reward_one_epoch = 0
+    # model.agent.reward_one_epoch = 0
 
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
 
@@ -47,78 +47,81 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
             outputs = model(samples)
             loss = criterion(samples, outputs, targets)
         
+
         # size of loss:[batch_size]
         loss_value = loss.item()
 
-        end_1 = time.perf_counter()
-        # train agent
-        # classify_results = outputs - targets
-        _, outputs_max_index = outputs.max(dim=1)
-        _, targets_max_index = targets.max(dim=1)
-        # self.buffer = 
-        # {
-        #     "state":[], -> [block_num, batch_size, token_num, token_dim]
-        #     "state_next":[], 
-        #     "action":[],
-        #     "action_prob":[]
-        # }
-        Transition = namedtuple('Transition', ['state', 'action',  'a_log_prob', 'reward', 'next_state'])
-        buffers = model.buffer
+        if args.train_agent:
+            end_1 = time.perf_counter()
+            # train agent
+            # classify_results = outputs - targets
+            _, outputs_max_index = outputs.max(dim=1)
+            _, targets_max_index = targets.max(dim=1)
+            # self.buffer = 
+            # {
+            #     "state":[], -> [block_num, batch_size, token_num, token_dim]
+            #     "state_next":[], 
+            #     "action":[],
+            #     "action_prob":[]
+            # }
+            Transition = namedtuple('Transition', ['state', 'action',  'a_log_prob', 'reward', 'next_state'])
+            buffers = model.buffer
 
-        batch_size = buffers["state"][0].shape[0]
-        token_num  = buffers["state"][0].shape[1]
-        block_num  = len(buffers["state"])
+            batch_size = buffers["state"][0].shape[0]
+            token_num  = buffers["state"][0].shape[1]
+            block_num  = len(buffers["state"])
+            token_keep_ratio = buffers["token_keep_ratio"][0]
 
-        # model.agent.reward_one_batch = 0
-        reward_one_batch = 0
-        for i in range(batch_size):
-            if outputs_max_index[i] == targets_max_index[i]:
-                classify_correct = True 
-            else:
-                classify_correct = False
+            # model.agent.reward_one_batch = 0
+            reward_one_batch = 0
+            for i in range(batch_size):
+                if outputs_max_index[i] == targets_max_index[i]:
+                    classify_correct = True 
+                else:
+                    classify_correct = False
 
-            for j in range(token_num):
-                del model.agent.buffer[:] # clear experience
-                token_done = False
-                for k in range(block_num):
-                    mask = buffers["mask"][k][i][j]
+                for j in range(token_num):
+                    del model.agent.buffer[:] # clear experience
+                    token_done = False
+                    for k in range(block_num):
+                        mask = buffers["mask"][k][i][j]
 
-                    if token_done:
-                        break
-                    # size of buffers["state"]: [block_num, batch_size, token_num, token_dim]
-                    state = buffers["state"][k][i][j]
-                    action = buffers["action"][k][i][j]
-                    if action  == 0:
-                        token_done = True
-                    action_prob = buffers["action_prob"][k][i][j]
-                    state_next = buffers["state_next"][k][i][j]
+                        if token_done:
+                            break
+                        # size of buffers["state"]: [block_num, batch_size, token_num, token_dim]
+                        state = buffers["state"][k][i][j]
+                        action = buffers["action"][k][i][j]
+                        if action  == 0:
+                            token_done = True
+                        action_prob = buffers["action_prob"][k][i][j]
+                        state_next = buffers["state_next"][k][i][j]
 
-                    reward = caculate_reward_per_step(j, classify_correct,
-                                                       action)
-                    trans = Transition(state.detach().cpu().numpy(), action, action_prob,
-                                       reward, state_next.detach().cpu().numpy())
-                    model.agent.store_transition(trans)
+                        reward = caculate_reward_per_step(k, classify_correct,
+                                                           action, token_keep_ratio)
+                        trans = Transition(state.detach().cpu().numpy(), action, action_prob,
+                                           reward, state_next.detach().cpu().numpy())
+                        model.agent.store_transition(trans)
 
-                    # model.agent.reward_one_epoch += reward
-                    reward_one_batch += reward
+                        # model.agent.reward_one_epoch += reward
+                        reward_one_batch += reward
+                        
                     
-                
-                # if len(model.agent.buffer) > model.agent.batch_size:
-                #     model.agent.update()
-                if len(model.agent.buffer) > 0:
-                    model.agent.update()
+                    # if len(model.agent.buffer) > model.agent.batch_size:
+                    #     model.agent.update()
+                    if len(model.agent.buffer) > 0:
+                        model.agent.update()
 
-        # if utils.is_main_process() and model.agent.training_step > 50000:
-        if model.agent.training_step > 2000:
-            model.agent.save_param()
-            print("save ppo weight")
-            # return
+            # if utils.is_main_process() and model.agent.training_step > 50000:
+            if model.agent.training_step > 2000:
+                model.agent.save_param()
+                print("save ppo weight")
+                # return
 
-        end_2 = time.perf_counter()
-        run_time_deit = end_1 -start
-        run_time_agent = end_2 - end_1 
-        # print("run time deit:", run_time_deit * 1000)
-        # print("run time agent:", run_time_agent * 1000)
+            end_2 = time.perf_counter()
+            run_time_deit = end_1 -start
+            run_time_agent = end_2 - end_1 
+            # print("run time deit:", run_time_deit * 1000)
+            # print("run time agent:", run_time_agent * 1000)
 
 
 
@@ -154,7 +157,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
 
-        if args.train_deit:
+        if args.train_deit or args.fine_tune:
             optimizer.zero_grad()
 
             # this attribute is added by timm on one optimizer (adahessian)
@@ -167,18 +170,22 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
 
         metric_logger.update(loss=loss_value)
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-        metric_logger.meters['reward_batch'].update(reward_one_batch, n=batch_size)
+        # metric_logger.meters['reward_batch'].update(reward_one_batch, n=batch_size)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
-def caculate_reward_per_step(num_block, classify_correct, action):
+def caculate_reward_per_step(num_block, classify_correct, action, token_keep_ratio):
     reward_for_classify = 12 
     reward_for_action = 1 
     # simplest: split equally
     if classify_correct:
-        reward_1 = 1
+        reward_1 = 1.0
+
+        # reward_2 = (1 - action)*2.5*(12-num_block)
+        # reward_3 = 0
+        # reward_3 = -action*num_block*0.125
         # reward_1 = reward_for_classify/12
         # reward_2 = reward_for_action
         
@@ -188,14 +195,25 @@ def caculate_reward_per_step(num_block, classify_correct, action):
         # reward_2 = - reward_for_action
         # reward_1 = 0
         reward_1 = -1
+        # reward_2 = 0
+        # reward_3 = 0
         # reward_3 = -(1 - action)*0.1
 
-    reward_3 = (1 - action)*100
-    reward_4 = - num_block * 0.1
+    # reward_2 = (1 - action)*16*(12-num_block)
+    reward_2 = (1 - action)*100
+    # reward_2 = (1 - action)*100*(12-num_block)
+    # reward_3 = -action*num_block*0.0125
+    reward_3 = 0
+    
+    if token_keep_ratio > 0.75:
+        reward_4 = -1*action
+    elif token_keep_ratio < 0.60:
+        reward_4 = -1*(1-action)
+    else:
+        reward_4 = 0
 
-
-    # return reward_1 + reward_2 + reward_3
-    return reward_1 + reward_3
+    return reward_1 + reward_2 + reward_3
+    # return reward_1 + reward_2
 
 def caculate_reward(num_block, classify_correct, action):
     # size of action: [token_num] -> 197

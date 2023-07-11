@@ -41,7 +41,7 @@ class Actor(nn.Module):
         # size of x: [token_num, token_dim] -> [197, 768]
         # size of action: [token_num] -> [197]
         x = F.relu(self.fc1(x))
-        action_prob = F.softmax(self.action_head(x), dim=1)
+        action_prob = F.softmax(self.action_head(x), dim=-1)
         return action_prob
 
 
@@ -58,6 +58,7 @@ class Critic(nn.Module):
 
 
 class PPO(nn.Module):
+    # class PPO():
     clip_param = 0.2
     max_grad_norm = 0.5
     ppo_update_time = 1
@@ -74,6 +75,7 @@ class PPO(nn.Module):
         self.writer = SummaryWriter('../exp')
         self.reward_one_epoch = 0
         self.reward_one_batch = 0
+        self.warm_up_step = 0
 
         self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-3)
         self.critic_net_optimizer = optim.Adam(self.critic_net.parameters(), 3e-3)
@@ -97,22 +99,53 @@ class PPO(nn.Module):
         return action.item(), action_prob[:,action.item()].item()
 
     def select_action_batch(self, state):
+        import time 
+        d = time.perf_counter()
         with torch.no_grad():
             action_prob = self.actor_net(state)
 
+        b = time.perf_counter()
         batch_size = state.shape[0]
         token_num = state.shape[1]
-        action_batch = np.empty(shape=[0, token_num])
-            # action = np.empty(shape=[0, token_num])
-        for i in range(batch_size):
-            a = action_prob[i]
-            c_image = Categorical(action_prob[i])
-            action_image = c_image.sample()
-            action_batch = np.append(action_image, [action_image.cpu().numpy()], axis=0)
-        
-        # action_prob_batch = torch.index_select(action_prob, 2, action_batch)
-        index = action_batch.reshape(action_batch.shape[0], action_batch.shape[1],1)
+        # action_batch = np.empty(shape=[0, batch_size])
+        # action_prob_batch = np.empty(shape=[0, batch_size])
+        # action = np.empty(shape=[0, token_num])
+
+        c_batch = Categorical(action_prob)
+        action_batch = c_batch.sample()
+
+        index = action_batch.reshape(action_batch.shape[0], action_batch.shape[1], 1)
+
         action_prob_batch = torch.gather(action_prob, 2, index)
+        action_prob_batch = action_prob_batch.reshape(action_prob_batch.shape[0],
+                                  action_prob_batch.shape[1])
+        # for i in range(batch_size):
+        #     c_image = Categorical(action_prob[i])
+        #     action_image = c_image.sample()
+        #     action_image = action_image.view(-1,1)
+
+        #     # action_batch = np.append(action_batch, [action_image.cpu().numpy()], axis=0)
+        # 
+        #     index = action_image.reshape(action_image.shape[0], 1)
+        #     action_prob_image = torch.gather(action_prob[i], 1, index)
+        #     # action_prob_batch = np.append(action_prob_batch, [action_prob_image.cpu()
+        #     #                                                   .numpy()], axis=0)
+        #     if i == 0:
+        #         action_batch = action_image
+        #         action_prob_batch = action_prob_image
+        #     else:
+        #         action_batch = torch.cat((action_batch, action_image),dim=-1)
+        #         action_prob_batch = torch.cat((action_prob_batch, action_prob_image),
+        #                                       dim=-1)
+
+        c = time.perf_counter()
+            
+        # print("run time_1:", (b-d) * 1000)
+        # print("run time_2:", (c-b) * 1000)
+
+        # action_prob_batch = torch.index_select(action_prob, 2, action_batch)
+        # index = action_batch.reshape(action_batch.shape[0], action_batch.shape[1],1)
+        # action_prob_batch = torch.gather(action_prob, 2, index)
 
         return action_batch, action_prob_batch
 
@@ -125,19 +158,28 @@ class PPO(nn.Module):
             # -> [197, 2]
             action_prob = self.actor_net(state)
 
-        i= 0
-        if i < 5000:
-            # prob_min = torch.take(action_prob, action_prob.argmin())
-            # action_prob_a = action_prob[:,0] - prob_min
-            # action_prob_b = action_prob[:,1] + prob_min
-            # action_prob = torch.cat((action_prob_a.view(-1,1),
-            #                          action_prob_b.view(-1,1)),1)
+        self.warm_up_step = 0
+        if self.warm_up_step < 7680:
             action_prob_a = action_prob[:, 0] * 0.2
             action_prob_b = action_prob[:, 1] + action_prob[:, 0] * 0.8
             action_prob = torch.cat((action_prob_a.view(-1,1),
                                      action_prob_b.view(-1,1)),1)
 
-            i += 1
+            self.warm_up_step += 1
+
+        # if self.warm_up_step >= 7680 and self.warm_up_step < 15360:
+        #     # prob_min = torch.take(action_prob, action_prob.argmin())
+        #     # action_prob_a = action_prob[:,0] - prob_min
+        #     # action_prob_b = action_prob[:,1] + prob_min
+        #     # action_prob = torch.cat((action_prob_a.view(-1,1),
+        #     #                          action_prob_b.view(-1,1)),1)
+        #     action_prob_a = action_prob[:, 0] * (0.15 +
+        #                                          0.85*(self.warm_up_step/15360))
+        #     action_prob_b = action_prob[:, 1] + action_prob[:, 0]*(0.85-0.85*self.warm_up_step/15360)
+        #     action_prob = torch.cat((action_prob_a.view(-1,1),
+        #                              action_prob_b.view(-1,1)),1)
+
+        #     self.warm_up_step += 1
 
 
         c = Categorical(action_prob)

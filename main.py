@@ -24,7 +24,7 @@ from samplers import RASampler
 from augment import new_data_aug_generator
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 
 import utils
 
@@ -165,6 +165,7 @@ def get_args_parser():
 
     parser.add_argument('--output_dir', default='./weight',
                         help='path where to save, empty for no saving')
+    parser.add_argument('--output_dir_fine_tune', default='./weight/finetune')
     parser.add_argument('--device', default='cuda',
                         help='device to use for training / testing')
     parser.add_argument('--seed', default=0, type=int)
@@ -174,6 +175,7 @@ def get_args_parser():
                         help='start epoch')
     parser.add_argument('--eval', action='store_true', help='Perform evaluation only')
     parser.add_argument('--eval-crop-ratio', default=0.875, type=float, help="Crop ratio for evaluation")
+    parser.add_argument('--fine_tune', action='store_true',help="fine tune ppo with deit")
     parser.add_argument('--dist-eval', action='store_true', default=False, help='Enabling distributed evaluation')
     parser.add_argument('--num_workers', default=10, type=int)
     parser.add_argument('--pin-mem', action='store_true',
@@ -198,6 +200,7 @@ def main(args):
         raise NotImplementedError("Finetuning with distillation not yet supported")
 
     device = torch.device(args.device)
+    # device = torch.device('cpu')
 
     # fix the seed for reproducibility
     seed = args.seed + utils.get_rank()
@@ -332,6 +335,7 @@ def main(args):
             
     model.to(device)
 
+    # close ema for model training
     model_ema = None
     if args.model_ema:
         # Important to create EMA model after cuda(), DP wrapper, and AMP but before SyncBN and DDP wrapper
@@ -343,7 +347,9 @@ def main(args):
 
     model_without_ddp = model
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model = torch.nn.parallel.DistributedDataParallel(model,device_ids=[args.gpu]
+                                                          ,
+                                                          find_unused_parameters=True)
         model_without_ddp = model.module
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
@@ -372,7 +378,11 @@ def main(args):
         if args.train_agent:
             if 'agent' in name:
                 param.requires_grad = True
-
+        if args.fine_tune:
+            if 'head' in name and 'agent' not in name:
+                param.requires_grad = True
+            if 'head' not in name:
+                param.requires_grad = False
     optimizer = create_optimizer(args, model_without_ddp)
     # optimizer = create_optimizer(args, filter(lambda p: p.requires_grad,
     #                                           model_without_ddp.parameters()))
@@ -419,6 +429,8 @@ def main(args):
     )
 
     output_dir = Path(args.output_dir)
+    if args.fine_tune:
+        output_dir = Path(args.output_dir_fine_tune)
     if args.resume:
         if args.resume.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
@@ -429,14 +441,16 @@ def main(args):
 
         checkpoint_deit_model = checkpoint['model']
         state_dict = model.state_dict()
+        if args.distributed:
+            state_dict = model.module.state_dict()
 
         checkpoint_ppo_actor = None
-        if args.resume_ppo and os.path.exists('./param/net_param/actor_net.pkl'):
-            checkpoint_ppo_actor = torch.load('./param/net_param/actor_net.pkl',
+        if args.resume_ppo and os.path.exists('./param/net_param/actor_net_2_200.pkl'):
+            checkpoint_ppo_actor = torch.load('./param/net_param/actor_net_2_200.pkl',
                                     map_location='cpu')
         checkpoint_ppo_critic = None
-        if args.resume_ppo and os.path.exists('./param/net_param/critic_net.pkl'):
-            checkpoint_ppo_critic = torch.load('./param/net_param/critic_net.pkl',
+        if args.resume_ppo and os.path.exists('./param/net_param/critic_net_2_200.pkl'):
+            checkpoint_ppo_critic = torch.load('./param/net_param/critic_net_2_200.pkl',
                                     map_location='cpu')
 
         for name in state_dict:
@@ -446,7 +460,11 @@ def main(args):
                 state_dict[name] = checkpoint_ppo_actor[name[16:]]
             if 'agent.critic' in name and checkpoint_ppo_critic is not None:
                 state_dict[name] = checkpoint_ppo_critic[name[17:]]
-        model_without_ddp.load_state_dict(state_dict)
+        if args.distributed:
+            print('Load param for distributed PPO')
+            model.module.load_state_dict(state_dict)
+        if not args.distributed:
+            model_without_ddp.load_state_dict(state_dict)
         # if not args.train-agent:
             # load agent weights from pth
 
@@ -472,6 +490,9 @@ def main(args):
     start_time = time.time()
     max_accuracy = 0.0
     max_reward = 0.0
+    
+    if args.fine_tune:
+        args.epochs = 30
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
@@ -493,7 +514,7 @@ def main(args):
                     'optimizer': optimizer.state_dict(),
                     'lr_scheduler': lr_scheduler.state_dict(),
                     'epoch': epoch,
-                    'model_ema': get_state_dict(model_ema),
+                    # 'model_ema': get_state_dict(model_ema),
                     'scaler': loss_scaler.state_dict(),
                     'args': args,
                 }, checkpoint_path)
@@ -512,7 +533,7 @@ def main(args):
                         'optimizer': optimizer.state_dict(),
                         'lr_scheduler': lr_scheduler.state_dict(),
                         'epoch': epoch,
-                        'model_ema': get_state_dict(model_ema),
+                        # 'model_ema': get_state_dict(model_ema),
                         'scaler': loss_scaler.state_dict(),
                         'args': args,
                     }, checkpoint_path)
@@ -531,15 +552,15 @@ def main(args):
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
-        if utils.is_main_process():
-            model.agent.save_param()
+        # if utils.is_main_process():
+        #     model.agent.save_param()
 
 
-        print('PPO Reward one epoch {} : {}'.format(epoch,
-                                                    model.agent.reward_one_epoch))
-        if utiles.is_main_process() and max_reward < model.agent.reward_one_epoch:
-            max_reward = model.agent.reward_one_epoch
-            model.agent.save_param_best()
+        # print('PPO Reward one epoch {} : {}'.format(epoch,
+        #                                             model.agent.reward_one_epoch))
+        # if utiles.is_main_process() and max_reward < model.agent.reward_one_epoch:
+        #     max_reward = model.agent.reward_one_epoch
+        #     model.agent.save_param_best()
 
         
 

@@ -35,6 +35,7 @@ def add_weight_decay(model, weight_decay=1e-5, skip_list=()):
         if len(param.shape) == 1 or name.endswith(".bias") or name in skip_list:
             no_decay.append(param)
         else:
+            print(name)
             decay.append(param)
     return [
         {'params': no_decay, 'weight_decay': 0.},
@@ -106,6 +107,7 @@ def create_optimizer_v2(
         weight_decay = 0.
     else:
         parameters = model.parameters()
+    # parameters = [p for p in parameters if p.requires_grad]
     # b = filter(lambda p: p.requires_grad, parameters)
     if 'fused' in opt_lower:
         assert has_apex and torch.cuda.is_available(), 'APEX and CUDA required for fused optimizers'
