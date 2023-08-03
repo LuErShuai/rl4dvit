@@ -24,7 +24,7 @@ from samplers import RASampler
 from augment import new_data_aug_generator
 
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
 import utils
 
@@ -357,8 +357,8 @@ def main(args):
         linear_scaled_lr = args.lr * args.batch_size * utils.get_world_size() / 512.0
         args.lr = linear_scaled_lr
 
-    for param in model.parameters():
-        param.requires_grad = False
+    # for param in model.parameters():
+    #     param.requires_grad = False
     # if args.train_deit:
     #     for name in model.state_dict():
     #         if 'agent' not in name:
@@ -374,15 +374,25 @@ def main(args):
     for name, param in model.named_parameters():
         if args.train_deit:
             if 'agent' not in name:
-                param.requires_grad = True
+                param.requires_grad = False
         if args.train_agent:
             if 'agent' in name:
                 param.requires_grad = True
+            if 'agent' not in name:
+                param.requires_grad = False
         if args.fine_tune:
             if 'head' in name and 'agent' not in name:
                 param.requires_grad = True
             if 'head' not in name:
                 param.requires_grad = False
+
+    # for p in model.parameters():
+    #     print(p.requires_grad)
+
+    # print('-------------------------------------------------')
+    # for p in model_without_ddp.parameters():
+    #     print(p.requires_grad)
+
     optimizer = create_optimizer(args, model_without_ddp)
     # optimizer = create_optimizer(args, filter(lambda p: p.requires_grad,
     #                                           model_without_ddp.parameters()))
@@ -445,12 +455,12 @@ def main(args):
             state_dict = model.module.state_dict()
 
         checkpoint_ppo_actor = None
-        if args.resume_ppo and os.path.exists('./param/net_param/actor_net_2_200.pkl'):
-            checkpoint_ppo_actor = torch.load('./param/net_param/actor_net_2_200.pkl',
+        if args.resume_ppo and os.path.exists('./param/net_param/actor_net.pkl'):
+            checkpoint_ppo_actor = torch.load('./param/net_param/actor_net.pkl',
                                     map_location='cpu')
         checkpoint_ppo_critic = None
-        if args.resume_ppo and os.path.exists('./param/net_param/critic_net_2_200.pkl'):
-            checkpoint_ppo_critic = torch.load('./param/net_param/critic_net_2_200.pkl',
+        if args.resume_ppo and os.path.exists('./param/net_param/critic_net.pkl'):
+            checkpoint_ppo_critic = torch.load('./param/net_param/critic_net.pkl',
                                     map_location='cpu')
 
         for name in state_dict:
@@ -494,6 +504,7 @@ def main(args):
     if args.fine_tune:
         args.epochs = 30
     for epoch in range(args.start_epoch, args.epochs):
+        torch.cuda.empty_cache()
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
 

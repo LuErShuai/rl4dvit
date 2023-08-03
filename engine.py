@@ -17,6 +17,7 @@ import utils
 
 from collections import namedtuple
 import time
+import random 
 
 def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
@@ -29,10 +30,13 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 1
     # model.agent.reward_one_epoch = 0
-
+    
+    # torch.cuda.empty_cache()
+    sample_num = 0
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
 
         start = time.perf_counter()
+        sample_num += 1
 
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
@@ -52,6 +56,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
         loss_value = loss.item()
 
         if args.train_agent:
+            torch.cuda.empty_cache()
             end_1 = time.perf_counter()
             # train agent
             # classify_results = outputs - targets
@@ -71,27 +76,29 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
             token_num  = buffers["state"][0].shape[1]
             block_num  = len(buffers["state"])
             token_keep_ratio = buffers["token_keep_ratio"][0]
+            # token_keep_ratio = 0
 
-            # model.agent.reward_one_batch = 0
-            reward_one_batch = 0
-            for i in range(batch_size):
+            time_2 = time.perf_counter()
+
+            # for i in range(batch_size):
+            for i in range(1):
+            # for i in random.sample(range(1,batch_size), 5):
                 if outputs_max_index[i] == targets_max_index[i]:
                     classify_correct = True 
                 else:
                     classify_correct = False
 
-                for j in range(token_num):
+                # for j in range(token_num):
+                for j in random.sample(range(1,token_num), 15):
                     del model.agent.buffer[:] # clear experience
                     token_done = False
                     for k in range(block_num):
-                        mask = buffers["mask"][k][i][j]
-
                         if token_done:
                             break
                         # size of buffers["state"]: [block_num, batch_size, token_num, token_dim]
                         state = buffers["state"][k][i][j]
                         action = buffers["action"][k][i][j]
-                        if action  == 0:
+                        if action == 0:
                             token_done = True
                         action_prob = buffers["action_prob"][k][i][j]
                         state_next = buffers["state_next"][k][i][j]
@@ -102,25 +109,26 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
                                            reward, state_next.detach().cpu().numpy())
                         model.agent.store_transition(trans)
 
-                        # model.agent.reward_one_epoch += reward
-                        reward_one_batch += reward
                         
                     
                     # if len(model.agent.buffer) > model.agent.batch_size:
                     #     model.agent.update()
-                    if len(model.agent.buffer) > 0:
-                        model.agent.update()
+                if len(model.agent.buffer) > 0:
+                    model.agent.update()
+
+            time_3 = time.perf_counter()
 
             # if utils.is_main_process() and model.agent.training_step > 50000:
-            if model.agent.training_step > 2000:
+            if sample_num%100 == 0:
                 model.agent.save_param()
-                print("save ppo weight")
+                print("-------------------save ppo weight-------------------")
                 # return
 
             end_2 = time.perf_counter()
             run_time_deit = end_1 -start
             run_time_agent = end_2 - end_1 
             # print("run time deit:", run_time_deit * 1000)
+            # print("run time cycle", (time_3 - time_2) * 1000)
             # print("run time agent:", run_time_agent * 1000)
 
 
@@ -157,12 +165,18 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
             print("Loss is {}, stopping training".format(loss_value))
             sys.exit(1)
 
-        if args.train_deit or args.fine_tune:
-            optimizer.zero_grad()
+        # if args.train_deit or args.fine_tune:
+        #     optimizer.zero_grad()
 
-            # this attribute is added by timm on one optimizer (adahessian)
-            is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
-            loss_scaler(loss, optimizer, clip_grad=max_norm, parameters=model.parameters(), create_graph=is_second_order)
+        #     # this attribute is added by timm on one optimizer (adahessian)
+        #     is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+        #     loss_scaler(loss, optimizer, clip_grad=max_norm, parameters=model.parameters(), create_graph=is_second_order)
+
+        # optimizer.zero_grad()
+
+        # # this attribute is added by timm on one optimizer (adahessian)
+        # is_second_order = hasattr(optimizer, 'is_second_order') and optimizer.is_second_order
+        # loss_scaler(loss, optimizer, clip_grad=max_norm, parameters=model.parameters(), create_graph=is_second_order)
 
         torch.cuda.synchronize()
         if model_ema is not None:
@@ -177,11 +191,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 def caculate_reward_per_step(num_block, classify_correct, action, token_keep_ratio):
-    reward_for_classify = 12 
-    reward_for_action = 1 
+    reward_for_classify = 4
+    reward_for_action = 2
+
     # simplest: split equally
     if classify_correct:
-        reward_1 = 1.0
+        reward_1 = 1.0*reward_for_classify
 
         # reward_2 = (1 - action)*2.5*(12-num_block)
         # reward_3 = 0
@@ -194,25 +209,54 @@ def caculate_reward_per_step(num_block, classify_correct, action, token_keep_rat
         # reward_1 = -reward_for_classify/12
         # reward_2 = - reward_for_action
         # reward_1 = 0
-        reward_1 = -1
+        reward_1 = -1.0*reward_for_classify
         # reward_2 = 0
         # reward_3 = 0
         # reward_3 = -(1 - action)*0.1
 
     # reward_2 = (1 - action)*16*(12-num_block)
-    reward_2 = (1 - action)*100
+    if classify_correct:
+        # reward_2 = (1 - action)
+        if action == 1:
+            reward_2 = 0
+        if action == 0:
+            reward_2 = 1.0
+    else:
+        if action == 1:
+            # reward_2 = -0.5
+            reward_2 = 0
+        if action == 0:
+            reward_2 = 0
     # reward_2 = (1 - action)*100*(12-num_block)
+    # reward_2 = 1 - action
     # reward_3 = -action*num_block*0.0125
     reward_3 = 0
-    
-    if token_keep_ratio > 0.75:
-        reward_4 = -1*action
-    elif token_keep_ratio < 0.60:
-        reward_4 = -1*(1-action)
-    else:
-        reward_4 = 0
 
-    return reward_1 + reward_2 + reward_3
+    
+    # reward_2 = (1-token_keep_ratio)*1
+    reward_2 = 0
+    eta = 16
+    # reward_4 = - math.exp(eta*abs(token_keep_ratio - 0.7))
+    
+    d = token_keep_ratio - 0.75
+    if d > 0:
+        reward_4 = - action*math.exp(eta*abs(d))
+    if d <= 0:
+        reward_4 = - (1-action)*math.exp(eta*abs(d))
+
+    # reward_2 = (1-token_keep_ratio)*1
+    
+    # if token_keep_ratio > 0.70:
+    #     reward_4 = -1*action*math.exp(eta*abs(token_keep_ratio-0.7))
+    # elif token_keep_ratio < 0.60:
+    #     reward_4 = -1*(1-action)*math.exp(eta*abs(token_keep_ratio - 0.6))
+    # else:
+    #     # reward_4 = (1-token_keep_ratio)*1
+    #     reward_4 = 0
+
+    eta = 0.60
+    return eta*reward_1 + (1-eta)*(reward_2 + reward_4)
+    # return reward_2
     # return reward_1 + reward_2
 
 def caculate_reward(num_block, classify_correct, action):

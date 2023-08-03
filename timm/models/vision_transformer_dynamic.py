@@ -196,7 +196,8 @@ class Attention(nn.Module):
             # mask: [B, 1, 1, N] -> [64, 1, 1, 197]
 
             # mask = torch.from_numpy(mask).cuda().view(mask.shape[0], 1, 1, mask.shape[1]) 
-            mask = torch.tensor(mask, dtype=attn.dtype, device=attn.device)
+            # mask = torch.tensor(mask, dtype=attn.dtype, device=attn.device)
+            mask = mask.to(dtype=attn.dtype, device=attn.device)
             mask = mask.view(mask.shape[0], 1, 1, mask.shape[1])
             # pdb.set_trace()
             mask = 1 - mask
@@ -417,155 +418,170 @@ hem to be on GPU p_rate (float): attention dropout rate
 
         
         start = time.perf_counter()
+        # size of buffer["state"]: [12, batch_size, token_num, token_dim]
+        # where 12 is the num of block
+        batch_size, token_num, token_dim = x.shape[0], x.shape[1], x.shape[2]
+        mask = torch.ones(batch_size, token_num, dtype=torch.int64,
+                          device=x.device)
+        # mask = torch.tensor(mask, dtype=torch.int64)
 
-        fine_tune = True
-        if fine_tune:
-            # size of buffer["state"]: [12, batch_size, token_num, token_dim]
-            # where 12 is the num of block
-            batch_size, token_num, token_dim = x.shape[0], x.shape[1], x.shape[2]
-            mask = torch.ones(batch_size, token_num, dtype=torch.int64,
-                              device=x.device)
-            # mask = torch.tensor(mask, dtype=torch.int64)
+        token_depth = 0
+        train_agent = True
+        # del self.buffer["state"][:]
+        # del self.buffer["action"][:]
+        # del self.buffer["action_prob"][:]
+        # del self.buffer["state_next"][:]
+        # del self.buffer["token_keep_ratio"][:]
 
-            token_depth = 0
-            for i, block in enumerate(self.blocks):
+        del self.buffer
 
-                # size of x: [bacth_size, token_num, token_dim]
-                # -> [64, 197, 168]
-                # size of action:[batch_size, token_num] -> [64, 197]
-                # size of action_prob: [batch_size, token_num, action_dim] -> [64, 197, 2]
+        self.buffer = {
+            "state":[], #[block_num, batch_size, token_num, token_dim]
+            "state_next":[],
+            "action":[],
+            "action_prob":[],
+            "mask":[],
+            "token_keep_ratio":[]
+        }
+        torch.cuda.empty_cache()
+        for i, block in enumerate(self.blocks):
 
-                c = time.perf_counter()
-                action, action_prob = self.agent.select_action_batch(x)
+            # size of x: [bacth_size, token_num, token_dim]
+            # -> [64, 197, 168]
+            # size of action:[batch_size, token_num] -> [64, 197]
+            # size of action_prob: [batch_size, token_num, action_dim] -> [64, 197, 2]
+            if i in [3,6,9]:
+                with torch.no_grad():
+                    action, action_prob = self.agent.select_action_batch(x.detach())
 
                 mask = torch.where(mask==0, mask, action)
                 mask[:, 0] = 1
-
-                # for j in range(batch_size):
-                #     mask_index = torch.nonzero(mask[j])
-                #     mask_index = mask_index.view(mask_index.shape[0])
-
-                #     # act_selected_by_index = torch.take(act, mask_index)
-                #     act_selected_by_index = torch.gather(action.cpu(), 0, mask_index)
-
-                #     mask[j].scatter_(0, mask_index, act_selected_by_index)
-                #     mask[j][0] = 1
-
-                # c = time.perf_counter()
-                # action = np.empty(shape=[0, token_num])
-                # action_prob = np.empty(shape=[0, token_num])
-
                 
-                # for j in range(batch_size):
-                #     # size of act:[token_num] -> [197]
-                #     # size of act_prob: [token_num, action_dim] -> [197, 2]
-                #     x_ = x[j].clone()
-                #     # x_ = x_.to(next(self.agent.actor_net.parameters()).device)
-    
-
-                #     time_0 = time.perf_counter()
-                #     act, act_prob = self.agent.select_action_image(x_)
-                #     act_prob_ = act_prob.view(197)
-
-                #     time_1 = time.perf_counter()
-
-                #     mask_index = torch.nonzero(mask[j])
-                #     mask_index = mask_index.view(mask_index.shape[0])
-
-                #     # act_selected_by_index = torch.take(act, mask_index)
-                #     act_selected_by_index = torch.gather(act.cpu(), 0, mask_index)
-
-                #     mask[j].scatter_(0, mask_index, act_selected_by_index)
-                #     mask[j][0] = 1
-
-                #     time_2 = time.perf_counter()
-                #     # print("run time:", (time_1-time_0) * 1000)
-                #     # print("run time:", (time_2-time_1) * 1000)
-                #     # print('000')
-                    
-                # clone_mask = mask.clone()
-                # clone_mask_ = clone_mask.view(-1,1)
-                # token_depth += sum(torch.squeeze(clone_mask_))
+                out = torch.unique(mask, return_counts=True)
                  
-                a = time.perf_counter()
-                
-                # print("run time:", (a-c) * 1000)
+                if train_agent:
+                    self.buffer["state"].append(x.detach())
+                    self.buffer["action"].append(action.detach())
+                    self.buffer["action_prob"].append(action_prob.detach())
+                    self.buffer["mask"].append(mask.detach())
+                    x = block.forward(x, mask)
+                    self.buffer["state_next"].append(x.detach())
+                if not train_agent:
+                    x = block.forward(x, mask)
+
+            if i not in [3,6,9]:
                 x = block.forward(x, mask)
-                b = time.perf_counter()
-                # print("run time:", (b-a) * 1000)
 
-        time_mid = time.perf_counter()
-        if not fine_tune:
-            del self.buffer["state"][:]
-            del self.buffer["action"][:]
-            del self.buffer["action_prob"][:]
-            del self.buffer["state_next"][:]
-            del self.buffer["token_keep_ratio"][:]
+            token_depth += torch.count_nonzero(mask).item()
 
-            # size of buffer["state"]: [12, batch_size, token_num, token_dim]
-            # where 12 is the num of block
-            batch_size, token_num, token_dim = x.shape[0], x.shape[1], x.shape[2]
-            mask = torch.ones(batch_size, token_num)
-            mask = torch.tensor(mask, dtype=torch.int64)
-
-            token_depth = 0
-            for i, block in enumerate(self.blocks):
-
-                # size of x: [bacth_size, token_num, token_dim]
-                # -> [64, 197, 168]
-                # size of action:[batch_size, token_num] -> [64, 197]
-                # size of action_prob: [batch_size, token_num, action_dim] -> [64, 197, 2]
-
-                time_2 = time.perf_counter() 
-
-                self.buffer["state"].append(x)
-                action = np.empty(shape=[0, token_num])
-                action_prob = np.empty(shape=[0, token_num])
-                time_3 = time.perf_counter() 
-
-                
-                for j in range(batch_size):
-                    # size of act:[token_num] -> [197]
-                    # size of act_prob: [token_num, action_dim] -> [197, 2]
-                    x_ = x[j].clone()
-                    # x_ = x_.to(next(self.agent.actor_net.parameters()).device)
-                    act, act_prob = self.agent.select_action_image(x_)
-                    act_prob_ = act_prob.view(197)
-
-                    action = np.append(action, [act.cpu().numpy()], axis=0)
-                    action_prob = np.append(action_prob, [act_prob_.cpu().numpy()],
-                                               axis=0)
-
-                    mask_index = torch.nonzero(mask[j])
-                    mask_index = mask_index.view(mask_index.shape[0])
-
-                    # act_selected_by_index = torch.take(act, mask_index)
-                    act_selected_by_index = torch.gather(act.cpu(), 0, mask_index)
-
-                    mask[j].scatter_(0, mask_index, act_selected_by_index)
-                    mask[j][0] = 1
-                    
-                clone_mask = mask.clone()
-                clone_mask_ = clone_mask.view(-1,1)
-                token_depth += sum(torch.squeeze(clone_mask_))
-
-                self.buffer["action"].append(action)
-                self.buffer["action_prob"].append(action_prob)
-                self.buffer["mask"].append(mask)
-
-                time_5 = time.perf_counter() 
-                 
-                x = block.forward(x, mask)
-                self.buffer["state_next"].append(x)
-        
-        # print(token_depth)
+        print(token_depth)
         token_keep_ratio = token_depth/(64*12*197)
         self.buffer["token_keep_ratio"].append(token_keep_ratio)
-        writer.add_scalar("TokenDepth",token_depth, self.batch_num)
-        self.batch_num += 1
-        end = time.perf_counter()
-        run_time_1 = time_mid - start 
-        run_time_2 = end - time_mid 
+
+
+
+        # fine_tune = True
+        # if fine_tune:
+        #     # size of buffer["state"]: [12, batch_size, token_num, token_dim]
+        #     # where 12 is the num of block
+        #     batch_size, token_num, token_dim = x.shape[0], x.shape[1], x.shape[2]
+        #     mask = torch.ones(batch_size, token_num, dtype=torch.int64,
+        #                       device=x.device)
+        #     # mask = torch.tensor(mask, dtype=torch.int64)
+
+        #     token_depth = 0
+        #     for i, block in enumerate(self.blocks):
+
+        #         # size of x: [bacth_size, token_num, token_dim]
+        #         # -> [64, 197, 168]
+        #         # size of action:[batch_size, token_num] -> [64, 197]
+        #         # size of action_prob: [batch_size, token_num, action_dim] -> [64, 197, 2]
+
+        #         c = time.perf_counter()
+        #         action, action_prob = self.agent.select_action_batch(x)
+
+        #         mask = torch.where(mask==0, mask, action)
+        #         mask[:, 0] = 1
+        #          
+        #         a = time.perf_counter()
+        #         
+        #         # print("run time:", (a-c) * 1000)
+        #         x = block.forward(x, mask)
+        #         b = time.perf_counter()
+        #         # print("run time:", (b-a) * 1000)
+
+        # time_mid = time.perf_counter()
+        # if not fine_tune:
+        #     del self.buffer["state"][:]
+        #     del self.buffer["action"][:]
+        #     del self.buffer["action_prob"][:]
+        #     del self.buffer["state_next"][:]
+        #     del self.buffer["token_keep_ratio"][:]
+
+        #     # size of buffer["state"]: [12, batch_size, token_num, token_dim]
+        #     # where 12 is the num of block
+        #     batch_size, token_num, token_dim = x.shape[0], x.shape[1], x.shape[2]
+        #     mask = torch.ones(batch_size, token_num)
+        #     mask = torch.tensor(mask, dtype=torch.int64)
+
+        #     token_depth = 0
+        #     for i, block in enumerate(self.blocks):
+
+        #         # size of x: [bacth_size, token_num, token_dim]
+        #         # -> [64, 197, 168]
+        #         # size of action:[batch_size, token_num] -> [64, 197]
+        #         # size of action_prob: [batch_size, token_num, action_dim] -> [64, 197, 2]
+
+        #         time_2 = time.perf_counter() 
+
+        #         self.buffer["state"].append(x)
+        #         action = np.empty(shape=[0, token_num])
+        #         action_prob = np.empty(shape=[0, token_num])
+        #         time_3 = time.perf_counter() 
+
+        #         
+        #         for j in range(batch_size):
+        #             # size of act:[token_num] -> [197]
+        #             # size of act_prob: [token_num, action_dim] -> [197, 2]
+        #             x_ = x[j].clone()
+        #             # x_ = x_.to(next(self.agent.actor_net.parameters()).device)
+        #             act, act_prob = self.agent.select_action_image(x_)
+        #             act_prob_ = act_prob.view(197)
+
+        #             action = np.append(action, [act.cpu().numpy()], axis=0)
+        #             action_prob = np.append(action_prob, [act_prob_.cpu().numpy()],
+        #                                        axis=0)
+
+        #             mask_index = torch.nonzero(mask[j])
+        #             mask_index = mask_index.view(mask_index.shape[0])
+
+        #             # act_selected_by_index = torch.take(act, mask_index)
+        #             act_selected_by_index = torch.gather(act.cpu(), 0, mask_index)
+
+        #             mask[j].scatter_(0, mask_index, act_selected_by_index)
+        #             mask[j][0] = 1
+        #             
+        #         clone_mask = mask.clone()
+        #         clone_mask_ = clone_mask.view(-1,1)
+        #         token_depth += sum(torch.squeeze(clone_mask_))
+
+        #         self.buffer["action"].append(action)
+        #         self.buffer["action_prob"].append(action_prob)
+        #         self.buffer["mask"].append(mask)
+
+        #         time_5 = time.perf_counter() 
+        #          
+        #         x = block.forward(x, mask)
+        #         self.buffer["state_next"].append(x)
+        # 
+        # # print(token_depth)
+        # token_keep_ratio = token_depth/(64*12*197)
+        # self.buffer["token_keep_ratio"].append(token_keep_ratio)
+        # writer.add_scalar("TokenDepth",token_depth, self.batch_num)
+        # self.batch_num += 1
+        # end = time.perf_counter()
+        # run_time_1 = time_mid - start 
+        # run_time_2 = end - time_mid 
         # print("run time:", run_time_1 * 1000)
         # print("run time:", run_time_2 * 1000)
 

@@ -35,12 +35,13 @@ class Actor(nn.Module):
     def __init__(self):
         super(Actor, self).__init__()
         self.fc1 = nn.Linear(num_state, 4*num_state)
+        self.fc2 = nn.Linear(4*num_state, 4*num_state)
         self.action_head = nn.Linear(4*num_state, num_action)
 
     def forward(self, x):
         # size of x: [token_num, token_dim] -> [197, 768]
         # size of action: [token_num] -> [197]
-        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(self.fc1(x)))
         action_prob = F.softmax(self.action_head(x), dim=-1)
         return action_prob
 
@@ -49,16 +50,17 @@ class Critic(nn.Module):
     def __init__(self):
         super(Critic, self).__init__()
         self.fc1 = nn.Linear(num_state, 4*num_state)
+        self.fc2 = nn.Linear(4*num_state, 4*num_state)
         self.state_value = nn.Linear(4*num_state, 1)
 
     def forward(self, x):
-        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(self.fc1(x)))
         value = self.state_value(x)
         return value
 
 
-class PPO(nn.Module):
-    # class PPO():
+# class PPO(nn.Module):
+class PPO():
     clip_param = 0.2
     max_grad_norm = 0.5
     ppo_update_time = 1
@@ -77,8 +79,10 @@ class PPO(nn.Module):
         self.reward_one_batch = 0
         self.warm_up_step = 0
 
-        self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-3)
-        self.critic_net_optimizer = optim.Adam(self.critic_net.parameters(), 3e-3)
+        self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-7)
+        self.critic_net_optimizer = optim.Adam(self.critic_net.parameters(), 3e-7)
+        # self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-3)
+        # self.critic_net_optimizer = optim.Adam(self.critic_net.parameters(), 3e-3)
         if not os.path.exists('./param'):
             os.makedirs('./param/net_param')
             os.makedirs('./param/img')
