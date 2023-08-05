@@ -191,7 +191,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: DistillationLoss,
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 def caculate_reward_per_step(num_block, classify_correct, action, token_keep_ratio):
-    reward_for_classify = 4
+    reward_for_classify = 1
     reward_for_action = 2
 
     # simplest: split equally
@@ -235,24 +235,28 @@ def caculate_reward_per_step(num_block, classify_correct, action, token_keep_rat
     
     # reward_2 = (1-token_keep_ratio)*1
     reward_2 = 0
-    eta = 16
+    eta = 32
     # reward_4 = - math.exp(eta*abs(token_keep_ratio - 0.7))
     
-    d = token_keep_ratio - 0.75
-    if d > 0:
-        reward_4 = - action*math.exp(eta*abs(d))
-    if d <= 0:
-        reward_4 = - (1-action)*math.exp(eta*abs(d))
+    # d = token_keep_ratio - 0.75
+    # if d > 0:
+    #     reward_4 = - action*math.exp(eta*abs(d))
+    # if d <= 0:
+    #     reward_4 = - (1-action)*math.exp(eta*abs(d))
 
     # reward_2 = (1-token_keep_ratio)*1
     
-    # if token_keep_ratio > 0.70:
-    #     reward_4 = -1*action*math.exp(eta*abs(token_keep_ratio-0.7))
-    # elif token_keep_ratio < 0.60:
-    #     reward_4 = -1*(1-action)*math.exp(eta*abs(token_keep_ratio - 0.6))
-    # else:
-    #     # reward_4 = (1-token_keep_ratio)*1
-    #     reward_4 = 0
+    if token_keep_ratio > 0.75:
+        reward_4 = -2-2*action*math.exp(eta*abs(token_keep_ratio-0.75))
+    elif token_keep_ratio <= 0.75 and token_keep_ratio > 0.70:
+        reward_4 = -2*action*math.exp(eta*abs(token_keep_ratio-0.7))
+    elif token_keep_ratio <= 0.70 and token_keep_ratio > 0.60:
+        reward_4 = (1-token_keep_ratio)*2
+    elif token_keep_ratio <= 0.60 and token_keep_ratio > 0.55:
+        reward_4 = -2*(1-action)*math.exp(eta*abs(token_keep_ratio - 0.6))
+    elif token_keep_ratio <= 0.55:
+        reward_4 = -2-2*(1-action)*math.exp(eta*abs(token_keep_ratio - 0.55))
+        # reward_4 = 0
 
     eta = 0.60
     return eta*reward_1 + (1-eta)*(reward_2 + reward_4)

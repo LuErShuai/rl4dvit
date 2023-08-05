@@ -79,8 +79,8 @@ class PPO():
         self.reward_one_batch = 0
         self.warm_up_step = 0
 
-        self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-7)
-        self.critic_net_optimizer = optim.Adam(self.critic_net.parameters(), 3e-7)
+        self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-6)
+        self.critic_net_optimizer = optim.Adam(self.critic_net.parameters(), 3e-6)
         # self.actor_optimizer = optim.Adam(self.actor_net.parameters(), 1e-3)
         # self.critic_net_optimizer = optim.Adam(self.critic_net.parameters(), 3e-3)
         if not os.path.exists('./param'):
